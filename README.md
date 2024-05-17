@@ -13,3 +13,7 @@ Work in Progress: Encryption Method
 23815 8e81dfd7 SHA-256 failed
 95303 c11eb5e6b SHA-256 failed
 ```
+
+8864 95d4361 SHA-256 failed
+
+38139 484cd1e XHC255 failed
