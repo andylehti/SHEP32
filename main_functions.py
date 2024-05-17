@@ -5,6 +5,8 @@ import sys
 import re
 sys.set_int_max_str_digits(0)
 
+# Apache2.0 License
+
 def encryptData(n):
     hKey = fetchKey(n)
     key, b = tDecimal(hKey, 16), 1543
@@ -16,43 +18,34 @@ def decryptData(n, k):
     key, b, n = tDecimal(k, 16), 1543, tDecimal(n, 62)
     keys = [key] + [key := int(processKey(key)) for _ in range(9)]
     n = dData(n, keys, b)
-    return n - (key // b)
+    return fDecimal(n - (key // b), 62)
 
 def pData(n, keys, b):
     for key in keys:
         n = keySplit(n, key, 1)
-        print(n)
         n = tDecimal(str(manipulateData(str(n), key)), 10)
-        print(n)
         n = baseSplit(int(n), key, b, 1)
-        print(n)
         n = kSplit(n, str(key))
-        print(n)
         if int(str(key)[0]) % 2 == 1:
             n = int(interject(str(n)))
-            print(n)
     return n
 
 def dData(n, keys, b):
     for key in reversed(keys):
         if int(str(key)[0]) % 2 == 1:
             n = int(inverJect(str(n)))
-            print(n)
         n = kSplit(n, str(key))
-        print(n)
         n = fDecimal(baseSplit(int(n), key, b, 0), 10)
-        print(n)
         n = inverseData(n, key)
-        print(n)
         n = keySplit(int(n), key, 0)
-        print(n)
     return n
 
 def checkData(n, i):
     while len(str(n)) < 80: n *= 3; n, i = n + i, i + i
-    return kSplit((int(qRotate(str(bSplit(n))) + processKey(n))) % ((10 ** 99) - 1), n)
+    n = sum(int(str(n)[i:i+80]) for i in range(0, len(str(n)), 80))
+    return kSplit((int(qRotate(str(bSplit(n))) + processKey(n))), n)
 def fetchKey(n): return manipulateKey(tDecimal(manipulateData(getKey(checkData(n+90, (n % 7) + 1), 79), n), 10))
-def manipulateKey(n): return fDecimal(tDecimal(hex(n)[2:], 16) + int(fDecimal(n, 16), 16), 16)[1:65]
+def manipulateKey(n): return fDecimal(tDecimal(hex(n)[2:], 16) + int(fDecimal(n, 16), 16), 16)[-63:-1]
 def getKey(n, x=78): return next(str(n) for _ in iter(int, 1) if len(str(n := (n // 8) + int(Ep(str(n // 5), len(str(n)))))) <= x)
 def anyBase(n, b): return '0' if n == 0 else ' '.join(str(n // b ** i % b) for i in range(int(math.log(n, b)), -1, -1))
 def fromAnyBase(n, b): return sum(int(c) * b ** i for i, c in enumerate(reversed(n.split(' '))))
@@ -111,7 +104,8 @@ def baseSplit(n, k, b=1543, y=1):
     while sCounts < nCounts: s += ' '.join(x for x in anyBase(k, (int(s.split()[-1]) + m)).split() if 2 <= len(x) <= 10) + ' '; sCounts = len(s.split())
     return fromAnyBase(' '.join(str((int(x) + (int(z)) * y) % int(b)) for x, z in zip(n.split(), s.split())), b)
 
-n = 13534748619904352843576995695381909245473
+n = 'ThisIsDataToEncryptAndTryToBreakOrExploitThisIsDataToEncryptAndTryToBreakOrExploitThisIsDataToEncryptAndTryToBreakOrExploitThisIsDataToEncryptAndTryToBreakOrExploitThisIsDataToEncryptAndTryToBreakOrExploitThisIsDataToEncryptAndTryToBreakOrExploitThisIsDataToEncryptAndTryToBreakOrExploitThisIsDataToEncryptAndTryToBreakOrExploitThisIsDataToEncryptAndTryToBreakOrExploitThisIsDataToEncryptAndTryToBreakOrExploitThisIsDataToEncryptAndTryToBreakOrExploitThisIsDataToEncryptAndTryToBreakOrExploit'
+n = tDecimal(n, 62)
 n, k = encryptData(n)
 print(n, k)
 decryptData(n, k)
