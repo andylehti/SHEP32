@@ -5,8 +5,6 @@ import sys
 import re
 sys.set_int_max_str_digits(0)
 
-# Apache2.0 License
-
 def encryptData(n):
     hKey = fetchKey(n)
     key, b = tDecimal(hKey, 16), 1543
