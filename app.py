@@ -154,10 +154,9 @@ if st.session_state.mode == 'Encrypt':
     s = st.text_area('Enter data to encrypt:', '', height=150)
     if s:
         e, k = encryptData(s)
-        st.text(f"Key: {k}")
-        st.markdown(f"```\n**Key:**\n{k}\n```")
-        st.markdown(f"```\n**Encrypted data:**\n{e}\n```")
-        st.markdown(f"```\n**Decrypted data:**\n{decryptData(e, k)}\n```")
+        st.markdown(f"\n**Key:**\n```{k}```\n")
+        st.markdown(f"\n**Encrypted data:**\n```{e}```\n")
+        st.markdown(f"\n**Decrypted data:**\n```{decryptData(e, k)}```\n")
 
 elif st.session_state.mode == 'Decrypt':
     st.title("Decryption:")
@@ -166,7 +165,7 @@ elif st.session_state.mode == 'Decrypt':
     d = sanitizeInput(d)
     r = sanitizeInput(r)
     if d and r:
-        st.markdown(f"```\n**Decrypted data:**\n{decryptData(e, k)}\n```")
+        st.markdown(f"\n**Decrypted data:**\n```{decryptData(e, k)}```\n")
 
 footer = f"""
 <div class="footer">
