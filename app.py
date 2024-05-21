@@ -107,7 +107,7 @@ def baseSplit(n, k, b=89, y=1):
 
 st.set_page_config(page_title="SCH-255 Encryption", page_icon="🔒")
 
-st.title("SCH-255 Encryption")
+st.title("SHEP-32: Series Hashing Encryption Protocol")
 st.write("Version only supports: '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.:;<>?@[]^ &()*$%/\`\"',_!#'")
 
 s = st.text_input("Enter data to encrypt:", "")
@@ -117,10 +117,4 @@ if s:
     st.write("Encrypted data:", s)
     st.write("Decrypted data:", decryptData(s, k))
     
-    decrypt_button = st.button("Decrypt Data")
-    if decrypt_button:
-        st.title("SCH-255 Decryption")
-        decrypted_data = decryptData(d, r)
-        st.write("Decrypted data:", decrypted_data)
-
-st.markdown("GitHub Repository: [SCH-255](https://github.com/andylehti/XHC255), Author: [AndrewLehti](https://twitter.com/andrewlehti)")
+st.markdown("GitHub Repository: [SHEP-32](https://github.com/andylehti/SHEP64), Author: [AndrewLehti](https://twitter.com/andrewlehti)")
