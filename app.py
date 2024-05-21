@@ -1,5 +1,4 @@
 import streamlit as st
-
 import math
 from random import seed, randint
 import string
@@ -105,16 +104,20 @@ def baseSplit(n, k, b=89, y=1):
     while sCounts < nCounts: s += ' '.join(x for x in anyBase(k, (int(s.split()[-1]) + m)).split() if 2 <= len(x) <= 10) + ' '; sCounts = len(s.split())
     return fromAnyBase(' '.join(str((int(x) + (int(z)) * y) % int(b)) for x, z in zip(n.split(), s.split())), b)
 
-import streamlit as st
+def sanitizeInput(inputText):
+    return re.sub(r'[^a-zA-Z0-9]', '', inputText)
 
 st.set_page_config(page_title="SHEP-32: Series Hashing Encryption Protocol", page_icon="🔒")
 
-tab = st.radio("Select Mode:", ('Encrypt', 'Decrypt'))
+col1, col2 = st.columns(2)
+with col1:
+    encrypt_btn = st.button("Encrypt")
+with col2:
+    decrypt_btn = st.button("Decrypt")
 
-if tab == 'Encrypt':
+if encrypt_btn:
     st.title("Encryption:")
-    st.write("Version supports: '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.:;<>?@[]^ &()*$%/\`\"',_!#'")
-
+    st.code("Version supports: '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.:;<>?@[]^ &()*$%/\`\"',_!#'")
     s = st.text_input("Enter data to encrypt:", "")
     if s:
         e, k = encryptData(s)
@@ -122,11 +125,14 @@ if tab == 'Encrypt':
         st.write(f"Encrypted data: {e}")
         st.write(f"Decrypted data: {decryptData(e, k)}")
 
-elif tab == 'Decrypt':
+elif decrypt_btn:
     st.title("Decryption:")
     d = st.text_input("Enter data to decrypt:", "")
     r = st.text_input("Enter key:", "")
+    d = sanitizeInput(d)
+    r = sanitizeInput(r)
     if d and r:
         st.write(f"Decrypted data: {decryptData(d, r)}")
 
-st.markdown("GitHub Repository: [SHEP-32](https://github.com/andylehti/SHEP32), Author: [AndrewLehti](https://twitter.com/andrewlehti)")
+with st.expander("credits::"):
+    st.markdown("GitHub Repository: [SHEP-32](https://github.com/andylehti/SHEP32), Author: [AndrewLehti](https://twitter.com/andrewlehti)")
