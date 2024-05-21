@@ -1,5 +1,5 @@
 # SHEP32
-Work in Progress: Encryption Method
+#### Series Hashing Encryption Protocol
 
 ### results of structure test:
 
