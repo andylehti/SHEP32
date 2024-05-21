@@ -1,7 +1,9 @@
-# XHC255
+# SHEP32
 Work in Progress: Encryption Method
 
 ### results of structure test:
+
+###### prior name: XHC-255
 
 ```plaintext
 3 4c XHC255 failed
