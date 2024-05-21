@@ -163,6 +163,7 @@ if st.session_state.mode == 'Encrypt':
             st.markdown("**Encrypted data:**")
             st.markdown(f'{e}')
             st.markdown("**Combined Data + Key:**\n")
+            st.markdown("for demonstration purposes only")
             combined = fDecimal(tDecimal(e, 62), 61) + 'Z' + fDecimal(tDecimal(k, 16), 61)
             st.markdown(f'{combined}')
             st.markdown("**Decrypted data:**")
