@@ -164,7 +164,7 @@ if st.session_state.mode == 'Encrypt':
             combined = fDecimal(tDecimal(e, 62), 61) + 'Z' + fDecimal(tDecimal(k, 16), 61)
             st.markdown(f'{combined}')
             st.markdown("**Decrypted data:**")
-            st.markdown(f'{decryptData(e, k)}')
+            st.markdown(decryptData(e, k))
 
 elif st.session_state.mode == 'Decrypt':
     st.title("Decryption:")
@@ -186,7 +186,7 @@ elif st.session_state.mode == 'Combined Decryption':
         v = fDecimal(tDecimal(v, 61), 62)
         if v and w:
             st.markdown("**Decrypted data:**")
-            st.markdown(f'{decryptData(v, w)}')
+            st.markdown(decryptData(v, w))
 
 footer = f"""
 <div class="footer">
