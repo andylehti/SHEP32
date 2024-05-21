@@ -155,12 +155,11 @@ with col3:
 if st.session_state.mode == 'Encrypt':
     st.title("Encryption:")
     s = st.text_area('Enter data to encrypt:', '', height=150)
-    k = st.number_input("Key: (optional: decimal format only)", min_value=0, format='%d', step=1)
-    m = 0
-    if k > 10000:
-        use_verbatim = st.checkbox("Use key verbatim")
-        if use_verbatim:
-            m = 1
+    key_input = st.text_input("Key: (optional: decimal format only)", '')
+    sanitized_key = ''.join(filter(str.isdigit, key_input))
+    k = int(sanitized_key) if sanitized_key else 0
+    use_verbatim = st.checkbox("Use key verbatim: only valid if key is larger than 10000")
+    m = 1 if use_verbatim else 0
     if st.button("Encrypt Data"):
         if s:
             e, k = encryptData(s, k, m)
