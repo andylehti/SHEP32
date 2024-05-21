@@ -109,6 +109,29 @@ def sanitizeInput(inputText):
 
 st.set_page_config(page_title="SHEP-32: Series Hashing Encryption Protocol", page_icon="🔒")
 
+st.markdown(
+    """
+    <style>
+    .reportview-container .main footer {visibility: hidden;}
+    [data-testid="stBlock"] {margin-bottom: -100px;}
+    .footer {
+        position: fixed;
+        left: 0;
+        bottom: 0;
+        width: 100%;
+        background-color: white;
+        color: black;
+        text-align: center;
+        padding: 10px;
+        border-top: 1px solid #e1e4e8;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+st.subheader('SHEP-32: Series Hashing Encryption Protocol', divider='rainbow')
+
 if 'mode' not in st.session_state:
     st.session_state.mode = 'Encrypt'
 
@@ -122,7 +145,8 @@ with col2:
 
 if st.session_state.mode == 'Encrypt':
     st.title("Encryption:")
-    st.code("Version supports: '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.:;<>?@[]^ &()*$%/\`\"',_!#'")
+    st.code('''version character support:''')
+    st.markdown(''':rainbow['0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.:;<>?@[]^ &()*$%/\`\"',_!#'"]''')
     s = st.text_input("Enter data to encrypt:", "")
     if s:
         e, k = encryptData(s)
@@ -139,6 +163,9 @@ elif st.session_state.mode == 'Decrypt':
     if d and r:
         st.write(f"Decrypted data: {decryptData(d, r)}")
 
-st.markdown("<style>.css-10trblm {padding-top: 100vh;}</style>", unsafe_allow_html=True)
-with st.expander("Repo:"):
-    st.markdown("GitHub Repository: [SHEP-32](https://github.com/andylehti/SHEP32), Author: [AndrewLehti](https://twitter.com/andrewlehti)")
+footer = f"""
+<div class="footer">
+    <p>GitHub Repository: <a href="https://github.com/andylehti/SHEP32" target="_blank">SHEP-32</a> | <a href="https://twitter.com/x" target="_blank">Author</a></p>
+</div>
+"""
+st.markdown(footer, unsafe_allow_html=True)
