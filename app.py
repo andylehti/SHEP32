@@ -145,8 +145,8 @@ with col2:
 
 if st.session_state.mode == 'Encrypt':
     st.title("Encryption:")
-    st.code('''version character support:''')
-    st.markdown(''':rainbow['0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.:;<>?@[]^ &()*$%/\`\"',_!#'"]''')
+    st.markdown('''**version character support:**''')
+    st.markdown('''<span style="font-size: 13px; text-align: justify; display: block; margin: 0 auto;">:rainbow[0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ \[.('`"/\\\,:;^_-!|*+<=>?@&#%$)\]]</span>''', unsafe_allow_html=True)
     s = st.text_input("Enter data to encrypt:", "")
     if s:
         e, k = encryptData(s)
@@ -165,7 +165,7 @@ elif st.session_state.mode == 'Decrypt':
 
 footer = f"""
 <div class="footer">
-    <p>GitHub Repository: <a href="https://github.com/andylehti/SHEP32" target="_blank">SHEP-32</a> | <a href="https://twitter.com/x" target="_blank">Author</a></p>
+    <p>GitHub Repository: <a href="https://github.com/andylehti/SHEP32" target="_blank">SHEP-32</a> | <a href="https://x.com/andylehti" target="_blank">Author</a></p>
 </div>
 """
 st.markdown(footer, unsafe_allow_html=True)
