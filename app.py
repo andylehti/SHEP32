@@ -158,7 +158,7 @@ if st.session_state.mode == 'Encrypt':
     key_input = st.text_input("Key: (optional: decimal format only)", '')
     sanitized_key = ''.join(filter(str.isdigit, key_input))
     k = int(sanitized_key) if sanitized_key else 0
-    use_verbatim = st.checkbox("Use key verbatim: only valid if key is larger than 10000")
+    use_verbatim = st.checkbox("Use key verbatim: only valid if key is larger than 11100000")
     m = 1 if use_verbatim else 0
     if st.button("Encrypt Data"):
         if s:
