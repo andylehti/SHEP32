@@ -7,7 +7,7 @@ sys.set_int_max_str_digits(0)
 
 def encryptData(n, k=0, m=0):
     n = toBytes(n)
-    hKey = fetchKey(n) if k < 10000 else (fDecimal(k, 16) if m == 1 and k >= 10000 else fetchKey(k))
+    hKey = fetchKey(n) if k < 11100000 else (fDecimal(k, 16) if m == 1 and k >= 11100000 else fetchKey(k))
     key, b = tDecimal(hKey, 16), 1543
     keys, n = [key] + [key := int(processKey(key)) for _ in range(9)], n + (key // b)
     n = pData(n, keys, b)
