@@ -155,8 +155,10 @@ if st.session_state.mode == 'Encrypt':
     if s:
         e, k = encryptData(s)
         st.write(f"Key: {k}")
-        st.write(f"Encrypted data: {e}")
-        st.text(f"**Decrypted data:**\n{decryptData(e, k)}")
+        st.markdown(f"**Encrypted data:**")
+        st.text(f"{e}")
+        st.markdown(f"**Decrypted data:**")
+        st.text(f"{decryptData(e, k)}")
 
 elif st.session_state.mode == 'Decrypt':
     st.title("Decryption:")
@@ -165,7 +167,8 @@ elif st.session_state.mode == 'Decrypt':
     d = sanitizeInput(d)
     r = sanitizeInput(r)
     if d and r:
-        st.text(f"**Decrypted data:**\n{decryptData(e, k)}")
+        st.markdown(f"**Decrypted data:**")
+        st.text(f"{decryptData(e, k)}")
 
 footer = f"""
 <div class="footer">
