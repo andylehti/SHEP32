@@ -1,15 +1,14 @@
 import streamlit as st
 import math
-import base64
 from random import seed, randint
 import string
 import sys
 import re
 sys.set_int_max_str_digits(0)
 
-def encryptData(n):
-    n = tDecimal(toBase64(n), 89)
-    hKey = fetchKey(n)
+def encryptData(n, k=0, m=0):
+    n = toBytes(n)
+    hKey = fetchKey(n) if k < 10000 else (fDecimal(k, 16) if m == 1 and k >= 10000 else fetchKey(k))
     key, b = tDecimal(hKey, 16), 1543
     keys, n = [key] + [key := int(processKey(key)) for _ in range(9)], n + (key // b)
     n = pData(n, keys, b)
@@ -19,7 +18,8 @@ def decryptData(n, k):
     key, b, n = tDecimal(k, 16), 1543, tDecimal(n, 62)
     keys = [key] + [key := int(processKey(key)) for _ in range(9)]
     n = dData(n, keys, b)
-    return fromBase64(fDecimal(n - (key // b), 89))
+    n = n - (key // b)
+    return fromBytes(n)
 
 def pData(n, keys, b):
     for key in keys:
@@ -46,14 +46,14 @@ def checkData(n, i):
     n = sum(int(str(n)[i:i+80]) for i in range(0, len(str(n)), 80))
     return kSplit((int(qRotate(str(bSplit(n))) + processKey(n))), n)
 
-def toBase64(s): return base64.b64encode(s.encode()).decode().translate(str.maketrans('+-=', '$!.'))
-def fromBase64(s): return base64.b64decode(s.translate(str.maketrans('$!.', '+-='))).decode()
+def toBytes(t): return fromAnyBase(' '.join(str(ord(c)) for c in t), 256)
+def fromBytes(b): return ''.join(chr(int(i)) for i in anyBase(b, 256).split())
 def fetchKey(n): return manipulateKey(tDecimal(manipulateData(getKey(checkData(n+90, (n % 7) + 1), 79), n), 10))
 def manipulateKey(n): return fDecimal(tDecimal(hex(n)[2:], 16) + int(fDecimal(n, 16), 16), 16)[-63:-1]
 def getKey(n, x=78): return next(str(n) for _ in iter(int, 1) if len(str(n := (n // 8) + int(Ep(str(n // 5), len(str(n)))))) <= x)
 def anyBase(n, b): return '0' if n == 0 else ' '.join(str(n // b ** i % b) for i in range(int(math.log(n, b)), -1, -1))
 def fromAnyBase(n, b): return sum(int(c) * b ** i for i, c in enumerate(reversed(n.split(' '))))
-def gChar(c): b = ''.join([x for x in string.printable[:90] if x not in '/\\`"\',_!#$%&()* +-=']) + ' &()*$%/\\`"\',_!#'; return b[:c]
+def gChar(c): b = ''.join([x for x in string.printable[:90] if x not in '/\\`"\',_!#$%&()* +-=']) + '&()*$%/\\`"\',_!#'; return b[:c]
 def generateSeries(s, n): seed(s); return ''.join(str(randint(0, 8)) for _ in range(n))
 def manipulateData(s, c): k = generateSeries(c, len(str(s))); return ''.join(str((int(s[i]) + int(k[i])) % 10) for i in range(len(s)))
 def inverseData(s, c): k = generateSeries(c, len(str(s))); return ''.join(str((int(s[i]) - int(k[i])) % 10) for i in range(len(s)))
@@ -91,18 +91,20 @@ def processKey(n, m=0):
     n = tDecimal(qRotate(str(n)), 10)
     return str(int(int(n) + int(a + b + '0' * (p-2))) + int(m))[-p:]
 
+def gChar(c): b = ''.join([x for x in string.printable[:90] if x not in '/\\`"\',_!#$%&()* +-=']) + '&()*$%/\\`"\',_!#'; return b[:c]
+
 def fDecimal(d, b):
     c, n, r, s = gChar(b), 1, d, ""
     while r >= b ** n: r -= b ** n; n += 1
     while r > 0: s = c[r % b] + s; r //= b
     return s.zfill(n)
 
-def tDecimal(c, b=89):
-    chars, v, l = gChar(b), 0, len(c)
-    v += sum(chars.index(ch) * (b ** i) for i, ch in enumerate(reversed(c)))
+def tDecimal(c, b):
+    chars, v, l = gChar(b), 0, len(str(c))
+    v += sum(chars.index(ch) * (b ** i) for i, ch in enumerate(reversed(str(c))))
     return v + sum(b ** i for i in range(1, l))
 
-def baseSplit(n, k, b=89, y=1):
+def baseSplit(n, k, b=1543, y=1):
     n, y, m = anyBase(n, b), 1 if y == 1 else -1, 2**16
     sCounts, nCounts, s = 0, len((n).split()), ' '.join(x for x in anyBase(k, m).split() if 2 <= len(x) <= 10) + ' '
     while sCounts < nCounts: s += ' '.join(x for x in anyBase(k, (int(s.split()[-1]) + m)).split() if 2 <= len(x) <= 10) + ' '; sCounts = len(s.split())
@@ -110,8 +112,6 @@ def baseSplit(n, k, b=89, y=1):
 
 def sanitizeInput(t):
     return re.sub(r'[^a-zA-Z0-9]', '', t)
-
-def safeLines(s): lines = s.strip().split('\n'); return '\n'.join(['<span style="user-select: none;"># </span>' + line for line in lines])
 
 st.set_page_config(page_title="SHEP-32: Series Hashing Encryption Protocol", page_icon="🔒")
 
@@ -155,9 +155,15 @@ with col3:
 if st.session_state.mode == 'Encrypt':
     st.title("Encryption:")
     s = st.text_area('Enter data to encrypt:', '', height=150)
+    k = st.number_input("Key: (optional: decimal format only)", min_value=0, format='%d', step=1)
+    m = 0
+    if k > 10000:
+        use_verbatim = st.checkbox("Use key verbatim")
+        if use_verbatim:
+            m = 1
     if st.button("Encrypt Data"):
         if s:
-            e, k = encryptData(s)
+            e, k = encryptData(s, k, m)
             st.markdown("**Key:**")
             st.markdown(f'{k}')
             st.markdown("**Encrypted data:**")
