@@ -160,9 +160,9 @@ if st.session_state.mode == 'Encrypt':
             st.text(k)
             st.markdown("**Encrypted data:**")
             st.text(e)
-            st.markdown("**Combined Data + Key:**\nred[no security]")
+            st.markdown("**Combined Data + Key:**\n")
             l = fDecimal(tDecimal(e, 62), 61) + 'Z' + fDecimal(tDecimal(k, 16), 61)
-            st.markdown("l")
+            st.text("l")
             st.markdown("**Decrypted data:**")
             st.text(decryptData(e, k))
 
