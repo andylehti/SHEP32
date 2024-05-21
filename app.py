@@ -167,12 +167,13 @@ if st.session_state.mode == 'Encrypt':
             st.markdown(f'{k}')
             st.markdown("**Encrypted data:**")
             st.markdown(f'{e}')
+            st.markdown("**Decrypted data:**")
+            st.html(f'<p style="white-space: pre-wrap; overflow-wrap: break-word; overflow: hidden;">{decryptData(e, k)}</p>')
+            st.divider()
             st.markdown("**Combined Data + Key:**\n")
             st.markdown("for demonstration purposes only")
             combined = fDecimal(tDecimal(e, 62), 61) + 'Z' + fDecimal(tDecimal(k, 16), 61)
             st.markdown(f'{combined}')
-            st.markdown("**Decrypted data:**")
-            st.html(f'<p style="white-space: pre-wrap; overflow-wrap: break-word; overflow: hidden;">{decryptData(e, k)}</p>')
 
 elif st.session_state.mode == 'Decrypt':
     st.title("Decryption:")
