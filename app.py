@@ -108,15 +108,23 @@ def baseSplit(n, k, b=89, y=1):
 st.set_page_config(page_title="SCH-255 Encryption", page_icon="🔒")
 
 st.title("SCH-255 Encryption")
-st.write("Version only supports: '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.:;<>?@[]^ &()*$%/\`\"',_!#'")
+st.write("Version only supports:")
+st.code("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.:;<>?@[]^ &()*$%/`\"',_!#'")
 
 s = st.text_input("Enter data to encrypt:", "")
 if s:
     s, k = encryptData(s)
     st.write("Key:", k)
     st.write("Encrypted data:", s)
+    st.write("Decrypted data:", decryptData(s, k))
+    
+st.title("SCH-255 Decryption")
+d = st.text_input("Enter encrypted data to decrypt:", "")
+r = st.text_input("Enter key for decryption:", "")
 
-    d = s
-    r = k
+decrypt_button = st.button("Decrypt Data")
+if decrypt_button and d and r:
+    decrypted_data = decryptData(d, r)
+    st.write("Decrypted data:", decrypted_data)
 
-    st.write("Decrypted data:", decryptData(d, r))
+st.markdown("GitHub Repository: [SCH-255](https://github.com/andylehti/XHC255), Author: [AndrewLehti](https://twitter.com/andrewlehti)")
