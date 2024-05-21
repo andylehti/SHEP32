@@ -154,7 +154,8 @@ if st.session_state.mode == 'Encrypt':
     s = st.text_area('Enter data to encrypt:', '', height=150)
     if s:
         e, k = encryptData(s)
-        st.write(f"Key: {k}")
+        st.markdown(f"**Key:**")
+        st.text(f"{k}")
         st.markdown(f"**Encrypted data:**")
         st.text(f"{e}")
         st.markdown(f"**Decrypted data:**")
