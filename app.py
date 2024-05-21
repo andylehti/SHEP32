@@ -109,13 +109,18 @@ def sanitizeInput(inputText):
 
 st.set_page_config(page_title="SHEP-32: Series Hashing Encryption Protocol", page_icon="🔒")
 
+if 'mode' not in st.session_state:
+    st.session_state.mode = 'Encrypt'
+
 col1, col2 = st.columns(2)
 with col1:
-    encrypt_btn = st.button("Encrypt")
+    if st.button("Encrypt"):
+        st.session_state.mode = 'Encrypt'
 with col2:
-    decrypt_btn = st.button("Decrypt")
+    if st.button("Decrypt"):
+        st.session_state.mode = 'Decrypt'
 
-if encrypt_btn:
+if st.session_state.mode == 'Encrypt':
     st.title("Encryption:")
     st.code("Version supports: '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.:;<>?@[]^ &()*$%/\`\"',_!#'")
     s = st.text_input("Enter data to encrypt:", "")
@@ -125,7 +130,7 @@ if encrypt_btn:
         st.write(f"Encrypted data: {e}")
         st.write(f"Decrypted data: {decryptData(e, k)}")
 
-elif decrypt_btn:
+elif st.session_state.mode == 'Decrypt':
     st.title("Decryption:")
     d = st.text_input("Enter data to decrypt:", "")
     r = st.text_input("Enter key:", "")
@@ -134,5 +139,6 @@ elif decrypt_btn:
     if d and r:
         st.write(f"Decrypted data: {decryptData(d, r)}")
 
-with st.expander("credits::"):
+st.markdown("<style>.css-10trblm {padding-top: 100vh;}</style>", unsafe_allow_html=True)
+with st.expander("Repo:"):
     st.markdown("GitHub Repository: [SHEP-32](https://github.com/andylehti/SHEP32), Author: [AndrewLehti](https://twitter.com/andrewlehti)")
