@@ -105,16 +105,28 @@ def baseSplit(n, k, b=89, y=1):
     while sCounts < nCounts: s += ' '.join(x for x in anyBase(k, (int(s.split()[-1]) + m)).split() if 2 <= len(x) <= 10) + ' '; sCounts = len(s.split())
     return fromAnyBase(' '.join(str((int(x) + (int(z)) * y) % int(b)) for x, z in zip(n.split(), s.split())), b)
 
-st.set_page_config(page_title="SCH-255 Encryption", page_icon="🔒")
+import streamlit as st
 
-st.title("SHEP-32: Series Hashing Encryption Protocol")
-st.write("Version only supports: '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.:;<>?@[]^ &()*$%/\`\"',_!#'")
+st.set_page_config(page_title="SHEP-32: Series Hashing Encryption Protocol", page_icon="🔒")
 
-s = st.text_input("Enter data to encrypt:", "")
-if s:
-    s, k = encryptData(s)
-    st.write("Key:", k)
-    st.write("Encrypted data:", s)
-    st.write("Decrypted data:", decryptData(s, k))
-    
-st.markdown("GitHub Repository: [SHEP-32](https://github.com/andylehti/SHEP64), Author: [AndrewLehti](https://twitter.com/andrewlehti)")
+tab = st.radio("Select Mode:", ('Encrypt', 'Decrypt'))
+
+if tab == 'Encrypt':
+    st.title("Encryption:")
+    st.write("Version supports: '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.:;<>?@[]^ &()*$%/\`\"',_!#'")
+
+    s = st.text_input("Enter data to encrypt:", "")
+    if s:
+        e, k = encryptData(s)
+        st.write(f"Key: {k}")
+        st.write(f"Encrypted data: {e}")
+        st.write(f"Decrypted data: {decryptData(e, k)}")
+
+elif tab == 'Decrypt':
+    st.title("Decryption:")
+    d = st.text_input("Enter data to decrypt:", "")
+    r = st.text_input("Enter key:", "")
+    if d and r:
+        st.write(f"Decrypted data: {decryptData(d, r)}")
+
+st.markdown("GitHub Repository: [SHEP-32](https://github.com/andylehti/SHEP32), Author: [AndrewLehti](https://twitter.com/andrewlehti)")
