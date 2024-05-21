@@ -164,7 +164,7 @@ if st.session_state.mode == 'Encrypt':
             combined = fDecimal(tDecimal(e, 62), 61) + 'Z' + fDecimal(tDecimal(k, 16), 61)
             st.markdown(f'{combined}')
             st.markdown("**Decrypted data:**")
-            st.markdown(f'<p style="white-space: pre-wrap;">{decryptData(e, k)}</p>', unsafe_allow_html=True)
+            st.code(decryptData(e, k), language=None)
 
 elif st.session_state.mode == 'Decrypt':
     st.title("Decryption:")
@@ -174,7 +174,7 @@ elif st.session_state.mode == 'Decrypt':
     r = sanitizeInput(r)
     if d and r:
         st.markdown("**Decrypted data:**")
-        st.markdown(f'<p style="white-space: pre-wrap;">{decryptData(d, r)}</p>', unsafe_allow_html=True)
+        st.code(decryptData(d, r), language=None)
 
 elif st.session_state.mode == 'Combined Decryption':
     st.title("Combined String Decryption:")
@@ -186,7 +186,7 @@ elif st.session_state.mode == 'Combined Decryption':
         v = fDecimal(tDecimal(v, 61), 62)
         if v and w:
             st.markdown("**Decrypted data:**")
-            st.markdown(f'<p style="white-space: pre-wrap;">{decryptData(v, w)}</p>', unsafe_allow_html=True)
+            st.code(decryptData(v, w), language=None)
 
 footer = f"""
 <div class="footer">
