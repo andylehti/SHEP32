@@ -2,7 +2,6 @@ import streamlit as st
 import math
 import base64
 from random import seed, randint
-import streamlit.components.v1 as components
 import string
 import sys
 import re
@@ -167,7 +166,7 @@ if st.session_state.mode == 'Encrypt':
             combined = fDecimal(tDecimal(e, 62), 61) + 'Z' + fDecimal(tDecimal(k, 16), 61)
             st.markdown(f'{combined}')
             st.markdown("**Decrypted data:**")
-            components.html(f'<p style="white-space: pre-wrap; overflow-wrap: break-word;">{decryptData(e, k)}</p>')
+            st.html(f'<p style="white-space: pre-wrap; overflow-wrap: break-word; overflow: hidden;">{decryptData(e, k)}</p>')
 
 elif st.session_state.mode == 'Decrypt':
     st.title("Decryption:")
@@ -177,7 +176,7 @@ elif st.session_state.mode == 'Decrypt':
     r = sanitizeInput(r)
     if d and r:
         st.markdown("**Decrypted data:**")
-        components.html(f'<p style="white-space: pre-wrap; overflow-wrap: break-word;">{decryptData(d, r)}</p>')
+        st.html(f'<p style="white-space: pre-wrap; overflow-wrap: break-word; overflow: hidden;">{decryptData(d, r)}</p>')
 
 elif st.session_state.mode == 'Combined Decryption':
     st.title("Combined String Decryption:")
@@ -189,7 +188,7 @@ elif st.session_state.mode == 'Combined Decryption':
         v = fDecimal(tDecimal(v, 61), 62)
         if v and w:
             st.markdown("**Decrypted data:**")
-            components.html(f'<p style="white-space: pre-wrap; overflow-wrap: break-word;">{decryptData(v, w)}</p>')
+            st.html(f'<p style="white-space: pre-wrap; overflow-wrap: break-word; overflow: hidden;">{decryptData(v, w)}</p>')
 
 footer = f"""
 <div class="footer">
