@@ -111,7 +111,7 @@ def baseSplit(n, k, b=89, y=1):
 def sanitizeInput(t):
     return re.sub(r'[^a-zA-Z0-9]', '', t)
 
-def safeLines(s): lines = s.strip().split('\n'); return '\n'.join(['# ' + line for line in lines])
+def safeLines(s): lines = s.strip().split('\n'); return '\n'.join(['<span style="user-select: none;"># </span>' + line for line in lines])
 
 st.set_page_config(page_title="SHEP-32: Series Hashing Encryption Protocol", page_icon="🔒")
 
