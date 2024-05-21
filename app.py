@@ -186,7 +186,7 @@ elif st.session_state.mode == 'Combined Decryption':
         v = fDecimal(tDecimal(v, 61), 62)
         if v and w:
             st.markdown("**Decrypted data:**")
-            st.code(decryptData(v, w), language=None)
+            st.markdown(f'<div style="white-space: pre-wrap;">{decryptData(v, w)}</div>', unsafe_allow_html=True)
 
 footer = f"""
 <div class="footer">
