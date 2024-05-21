@@ -111,6 +111,8 @@ def baseSplit(n, k, b=89, y=1):
 def sanitizeInput(t):
     return re.sub(r'[^a-zA-Z0-9]', '', t)
 
+def safeLines(s): lines = s.strip().split('\n'); return '\n'.join(['# ' + line for line in lines])
+
 st.set_page_config(page_title="SHEP-32: Series Hashing Encryption Protocol", page_icon="🔒")
 
 st.markdown(
@@ -164,7 +166,8 @@ if st.session_state.mode == 'Encrypt':
             combined = fDecimal(tDecimal(e, 62), 61) + 'Z' + fDecimal(tDecimal(k, 16), 61)
             st.markdown(f'{combined}')
             st.markdown("**Decrypted data:**")
-            st.code(decryptData(e, k), language=None)
+            dataOne = safeLines(decryptData(e, k))
+            st.markdown(f'<p style="white-space: pre-wrap;">{dataOne}</p>', unsafe_allow_html=True)
 
 elif st.session_state.mode == 'Decrypt':
     st.title("Decryption:")
@@ -174,8 +177,8 @@ elif st.session_state.mode == 'Decrypt':
     r = sanitizeInput(r)
     if d and r:
         st.markdown("**Decrypted data:**")
-        data = st.text((decryptData(d, r))
-        st.markdown(f'<div style="white-space: pre-wrap;">{data}</div>', unsafe_allow_html=True)
+        dataTwo = safeLines(decryptData(d, r))
+        st.markdown(f'<p style="white-space: pre-wrap;">{dataTwo}</p>', unsafe_allow_html=True)
 
 elif st.session_state.mode == 'Combined Decryption':
     st.title("Combined String Decryption:")
@@ -187,8 +190,8 @@ elif st.session_state.mode == 'Combined Decryption':
         v = fDecimal(tDecimal(v, 61), 62)
         if v and w:
             st.markdown("**Decrypted data:**")
-            data = st.text((decryptData(v, w))
-            st.markdown(f'<div style="white-space: pre-wrap;">{data}</div>', unsafe_allow_html=True)
+            dataThree = safeLines(decryptData(v, w))
+            st.markdown(f'<p style="white-space: pre-wrap;">{dataThree}</p>', unsafe_allow_html=True)
 
 footer = f"""
 <div class="footer">
