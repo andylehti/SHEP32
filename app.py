@@ -1,5 +1,6 @@
 import streamlit as st
 import math
+import base64
 from random import seed, randint
 import string
 import sys
@@ -7,7 +8,7 @@ import re
 sys.set_int_max_str_digits(0)
 
 def encryptData(n):
-    n = tDecimal(n, 89)
+    n = tDecimal(toBase64(n), 89)
     hKey = fetchKey(n)
     key, b = tDecimal(hKey, 16), 1543
     keys, n = [key] + [key := int(processKey(key)) for _ in range(9)], n + (key // b)
@@ -18,7 +19,7 @@ def decryptData(n, k):
     key, b, n = tDecimal(k, 16), 1543, tDecimal(n, 62)
     keys = [key] + [key := int(processKey(key)) for _ in range(9)]
     n = dData(n, keys, b)
-    return fDecimal(n - (key // b), 89)
+    return fromBase64(fDecimal(n - (key // b), 89))
 
 def pData(n, keys, b):
     for key in keys:
@@ -44,6 +45,9 @@ def checkData(n, i):
     while len(str(n)) < 80: n *= 3; n, i = n + i, i + i
     n = sum(int(str(n)[i:i+80]) for i in range(0, len(str(n)), 80))
     return kSplit((int(qRotate(str(bSplit(n))) + processKey(n))), n)
+
+def toBase64(s): return base64.b64encode(s.encode()).decode().translate(str.maketrans('+-=', '$!.'))
+def fromBase64(s): return base64.b64decode(s.translate(str.maketrans('$!.', '+-='))).decode()
 def fetchKey(n): return manipulateKey(tDecimal(manipulateData(getKey(checkData(n+90, (n % 7) + 1), 79), n), 10))
 def manipulateKey(n): return fDecimal(tDecimal(hex(n)[2:], 16) + int(fDecimal(n, 16), 16), 16)[-63:-1]
 def getKey(n, x=78): return next(str(n) for _ in iter(int, 1) if len(str(n := (n // 8) + int(Ep(str(n // 5), len(str(n)))))) <= x)
@@ -107,9 +111,6 @@ def baseSplit(n, k, b=89, y=1):
 def sanitizeInput(t):
     return re.sub(r'[^a-zA-Z0-9]', '', t)
 
-def sanitize(t):
-    return re.sub(r'[^0-9a-zA-Z \[\]\.\(\'`"/\\,:;^_\!|*<>?@&#%$\)]', '', t)
-
 st.set_page_config(page_title="SHEP-32: Series Hashing Encryption Protocol", page_icon="🔒")
 
 st.markdown(
@@ -150,9 +151,8 @@ if st.session_state.mode == 'Encrypt':
     st.title("Encryption:")
     st.markdown('''**version character support:**''')
     st.markdown('''<span style="font-size: 13px; text-align: justify; display: block; margin: 0 auto;">:rainbow[0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ \[.('`"/\\\,:;^_!|*<>?@&#%$)\]]</span>''', unsafe_allow_html=True)
-    s = st.text_input("Enter data to encrypt:", "")
+    s = st.text_area('Enter data to encrypt:', '', height=150)
     if s:
-        s = sanitize(s)
         e, k = encryptData(s)
         st.write(f"Key: {k}")
         st.write(f"Encrypted data: {e}")
