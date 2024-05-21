@@ -149,7 +149,7 @@ with col2:
 if st.session_state.mode == 'Encrypt':
     st.title("Encryption:")
     st.markdown('''**version character support:**''')
-    st.markdown('''<span style="font-size: 13px; text-align: justify; display: block; margin: 0 auto;">:rainbow[0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ \[.('`"/\\\,:;^_-!|*+<=>?@&#%$)\]]</span>''', unsafe_allow_html=True)
+    st.markdown('''<span style="font-size: 13px; text-align: justify; display: block; margin: 0 auto;">:rainbow[0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ \[.('`"/\\\,:;^_!|*<>?@&#%$)\]]</span>''', unsafe_allow_html=True)
     s = st.text_input("Enter data to encrypt:", "")
     if s:
         s = sanitize(s)
