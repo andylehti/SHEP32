@@ -104,8 +104,11 @@ def baseSplit(n, k, b=89, y=1):
     while sCounts < nCounts: s += ' '.join(x for x in anyBase(k, (int(s.split()[-1]) + m)).split() if 2 <= len(x) <= 10) + ' '; sCounts = len(s.split())
     return fromAnyBase(' '.join(str((int(x) + (int(z)) * y) % int(b)) for x, z in zip(n.split(), s.split())), b)
 
-def sanitizeInput(inputText):
-    return re.sub(r'[^a-zA-Z0-9]', '', inputText)
+def sanitizeInput(t):
+    return re.sub(r'[^a-zA-Z0-9]', '', t)
+
+def sanitize(t):
+    return re.sub(r'[0-9a-zA-Z\ \[\.\(\'`"/\\,:;^_\-!|*+<=>?@&#%$\)]', '', t)
 
 st.set_page_config(page_title="SHEP-32: Series Hashing Encryption Protocol", page_icon="🔒")
 
@@ -149,6 +152,7 @@ if st.session_state.mode == 'Encrypt':
     st.markdown('''<span style="font-size: 13px; text-align: justify; display: block; margin: 0 auto;">:rainbow[0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ \[.('`"/\\\,:;^_-!|*+<=>?@&#%$)\]]</span>''', unsafe_allow_html=True)
     s = st.text_input("Enter data to encrypt:", "")
     if s:
+        s = sanitize(s)
         e, k = encryptData(s)
         st.write(f"Key: {k}")
         st.write(f"Encrypted data: {e}")
