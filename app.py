@@ -148,9 +148,9 @@ with col2:
         st.session_state.mode = 'Decrypt'
 
 if st.session_state.mode == 'Encrypt':
-    st.title("Encryption:")
-    st.markdown('''**version character support:**''')
-    st.markdown('''<span style="font-size: 13px; text-align: justify; display: block; margin: 0 auto;">:rainbow[0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ \[.('`"/\\\,:;^_!|*<>?@&#%$)\]]</span>''', unsafe_allow_html=True)
+    st.title("Data Encryption:")
+    # st.markdown('''**version character support:**''')
+    # st.markdown('''<span style="font-size: 13px; text-align: justify; display: block; margin: 0 auto;">:rainbow[0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ \[.('`"/\\\,:;^_!|*<>?@&#%$)\]]</span>''', unsafe_allow_html=True)
     s = st.text_area('Enter data to encrypt:', '', height=150)
     if s:
         e, k = encryptData(s)
@@ -159,7 +159,7 @@ if st.session_state.mode == 'Encrypt':
         st.markdown(f"\n**Decrypted data:**\n```{decryptData(e, k)}```\n")
 
 elif st.session_state.mode == 'Decrypt':
-    st.title("Decryption:")
+    st.title("Data Decryption:")
     d = st.text_input("Enter data to decrypt:", "")
     r = st.text_input("Enter key:", "")
     d = sanitizeInput(d)
