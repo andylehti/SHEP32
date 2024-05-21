@@ -148,24 +148,24 @@ with col2:
         st.session_state.mode = 'Decrypt'
 
 if st.session_state.mode == 'Encrypt':
-    st.title("Data Encryption:")
+    st.title("Encryption:")
+    # st.markdown('''**version character support:**''')
+    # st.markdown('''<span style="font-size: 13px; text-align: justify; display: block; margin: 0 auto;">:rainbow[0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ \[.('`"/\\\,:;^_!|*<>?@&#%$)\]]</span>''', unsafe_allow_html=True)
     s = st.text_area('Enter data to encrypt:', '', height=150)
-    if st.button('Encrypt'):
-        if s:
-            e, k = encryptData(s)
-            st.markdown(f"\n**Key:**\n```\n{k}\n```\n")
-            st.markdown(f"\n**Encrypted data:**\n```\n{e}\n```\n")
-            st.markdown(f"\n**Decrypted data:**\n```\n{decryptData(e, k)}\n```\n")
+    if s:
+        e, k = encryptData(s)
+        st.write(f"Key: {k}")
+        st.write(f"Encrypted data: {e}")
+        st.text(f"Decrypted data:\n{decryptData(e, k)}")
 
 elif st.session_state.mode == 'Decrypt':
-    st.title("Data Decryption:")
+    st.title("Decryption:")
     d = st.text_input("Enter data to decrypt:", "")
     r = st.text_input("Enter key:", "")
-    if st.button('Decrypt'):
-        d = sanitizeInput(d)
-        r = sanitizeInput(r)
-        if d and r:
-            st.markdown(f"\n**Decrypted data:**\n```\n{decryptData(d, r)}\n```\n")
+    d = sanitizeInput(d)
+    r = sanitizeInput(r)
+    if d and r:
+        st.text(f"Decrypted data: {decryptData(e, k)}")
 
 footer = f"""
 <div class="footer">
