@@ -153,17 +153,18 @@ with col3:
 if st.session_state.mode == 'Encrypt':
     st.title("Encryption:")
     s = st.text_area('Enter data to encrypt:', '', height=150)
-    if s:
-        e, k = encryptData(s)
-        st.markdown("**Key:**")
-        st.text(k)
-        st.markdown("**Encrypted data:**")
-        st.text(e)
-        st.markdown("**Combined Data + Key:**\n")
-        l = fDecimal(tDecimal(e, 62), 61) + 'Z' + fDecimal(tDecimal(k, 16), 61)
-        st.text(l)
-        st.markdown("**Decrypted data:**")
-        st.text(decryptData(e, k))
+    if st.button("Encrypt Data"):
+        if s:
+            e, k = encryptData(s)
+            st.markdown("**Key:**")
+            st.text(k)
+            st.markdown("**Encrypted data:**")
+            st.text(e)
+            st.markdown("**Combined Data + Key:**\nred[no security]")
+            l = fDecimal(tDecimal(e, 62), 61) + 'Z' + fDecimal(tDecimal(k, 16), 61)
+            st.markdown("l")
+            st.markdown("**Decrypted data:**")
+            st.text(decryptData(e, k))
 
 elif st.session_state.mode == 'Decrypt':
     st.title("Decryption:")
