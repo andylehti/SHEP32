@@ -139,27 +139,31 @@ st.subheader('SHEP-32: Series Hashing Encryption Protocol', divider='rainbow')
 if 'mode' not in st.session_state:
     st.session_state.mode = 'Encrypt'
 
-col1, col2 = st.columns(2)
+col1, col2, col3 = st.columns(3)
 with col1:
     if st.button("Encrypt"):
         st.session_state.mode = 'Encrypt'
 with col2:
     if st.button("Decrypt"):
         st.session_state.mode = 'Decrypt'
+with col3:
+    if st.button("Combined Decryption"):
+        st.session_state.mode = 'Combined Decryption'
 
 if st.session_state.mode == 'Encrypt':
     st.title("Encryption:")
-    # st.markdown('''**version character support:**''')
-    # st.markdown('''<span style="font-size: 13px; text-align: justify; display: block; margin: 0 auto;">:rainbow[0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ \[.('`"/\\\,:;^_!|*<>?@&#%$)\]]</span>''', unsafe_allow_html=True)
     s = st.text_area('Enter data to encrypt:', '', height=150)
     if s:
         e, k = encryptData(s)
-        st.markdown(f"**Key:**")
-        st.text(f"{k}")
-        st.markdown(f"**Encrypted data:**")
-        st.text(f"{e}")
-        st.markdown(f"**Decrypted data:**")
-        st.text(f"{decryptData(e, k)}")
+        st.markdown("**Key:**")
+        st.text(k)
+        st.markdown("**Encrypted data:**")
+        st.text(e)
+        st.markdown("**Combined Data + Key:**\nred[no security]")
+        l = fDecimal(tDecimal(e, 62), 61) + 'Z' + fDecimal(tDecimal(k, 16), 61)
+        st.text(l)
+        st.markdown("**Decrypted data:**")
+        st.text(decryptData(e, k))
 
 elif st.session_state.mode == 'Decrypt':
     st.title("Decryption:")
@@ -168,8 +172,20 @@ elif st.session_state.mode == 'Decrypt':
     d = sanitizeInput(d)
     r = sanitizeInput(r)
     if d and r:
-        st.markdown(f"**Decrypted data:**")
-        st.text(f"{decryptData(e, k)}")
+        st.markdown("**Decrypted data:**")
+        st.text(decryptData(d, r))
+
+elif st.session_state.mode == 'Combined Decryption':
+    st.title("Combined String Decryption:")
+    q = st.text_input("Enter combined string data:", "")
+    q = sanitizeInput(q)
+    if 'Z' in q:
+        v, w = q.split('Z')
+        w = fDecimal(tDecimal(w, 61), 16)
+        v = fDecimal(tDecimal(v, 61), 62)
+        if v and w:
+            st.markdown("**Decrypted data:**")
+            st.text(decryptData(v, w))
 
 footer = f"""
 <div class="footer">
