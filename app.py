@@ -108,7 +108,7 @@ def sanitizeInput(t):
     return re.sub(r'[^a-zA-Z0-9]', '', t)
 
 def sanitize(t):
-    return re.sub(r'[0-9a-zA-Z\ \[\.\(\'`"/\\,:;^_\-!|*+<=>?@&#%$\)]', '', t)
+    return re.sub(r'[^0-9a-zA-Z \[\]\.\(\'`"/\\,:;^_\-!|*+<=>?@&#%$\)]', '', t)
 
 st.set_page_config(page_title="SHEP-32: Series Hashing Encryption Protocol", page_icon="🔒")
 
