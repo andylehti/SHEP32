@@ -199,7 +199,7 @@ elif st.session_state.mode == 'Combined Decryption':
 
 footer = f"""
 <div class="footer">
-    <p>GitHub Repository: <a href="https://github.com/andylehti/SHEP32" target="_blank">SHEP-32</a> | <a href="https://x.com/andylehti" target="_blank">Author</a></p>
+    <p>GitHub Repository: <a href="https://github.com/andylehti/SHEP32" target="_blank">SHEP-32</a>
 </div>
 """
 st.markdown(footer, unsafe_allow_html=True)
