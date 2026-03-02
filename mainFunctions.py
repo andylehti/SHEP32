@@ -5,13 +5,20 @@ import sys
 import re
 sys.set_int_max_str_digits(0)
 
-def encryptData(n, k=0):
+def encryptData(n, k=0, m=0):
     n = toBytes(n)
-    hKey = fetchKey(n) if k < 1 else fetchKey(k)
+    hKey = fetchKey(n) if k < 1 else (fDecimal(k, 16) if m == 1 and k >= 11100000 else fetchKey(k))
     key, b = tDecimal(hKey, 16), 1543
     keys, n = [key] + [key := int(processKey(key)) for _ in range(9)], n + (key // b)
     n = pData(n, keys, b)
     return fDecimal(n, 62), hKey
+
+def decryptDataRaw(n, k):
+    key, b, n = tDecimal(k, 16), 1543, tDecimal(n, 62)
+    keys = [key] + [key := int(processKey(key)) for _ in range(9)]
+    n = dData(n, keys, b)
+    n = n - (key // b)
+    return n
 
 def decryptData(n, k):
     key, b, n = tDecimal(k, 16), 1543, tDecimal(n, 62)
@@ -45,8 +52,20 @@ def checkData(n, i):
     n = sum(int(str(n)[i:i+80]) for i in range(0, len(str(n)), 80))
     return kSplit((int(qRotate(str(bSplit(n))) + processKey(n))), n)
 
-def toBytes(t): return fromAnyBase(' '.join(str(c) for c in t.encode('utf-16-le')), 256)
-def fromBytes(b): return bytes(int(i) for i in anyBase(b, 256).split()).decode('utf-16-le')
+#def toBytes(t): return fromAnyBase(' '.join(str(ord(c)) for c in t), 256)
+#def fromBytes(b): return ''.join(chr(int(i)) for i in anyBase(b, 256).split())
+
+def toBytes(t):
+    b = b"\x01" + t.encode("utf-16-le", errors="surrogatepass")
+    return fromAnyBase(" ".join(str(x) for x in b), 256)
+
+def fromBytes(n):
+    b = bytes(int(i) for i in anyBase(n, 256).split())
+    if not b or b[0] != 1:
+        raise ValueError("byte sentinel missing")
+    b = b[1:]
+    return b.decode("utf-16-le", errors="surrogatepass")
+
 def fetchKey(n): return manipulateKey(tDecimal(manipulateData(getKey(checkData(n+90, (n % 7) + 1), 79), n), 10))
 def manipulateKey(n): return fDecimal(tDecimal(hex(n)[2:], 16) + int(fDecimal(n, 16), 16), 16)[-63:-1]
 def getKey(n, x=78): return next(str(n) for _ in iter(int, 1) if len(str(n := (n // 8) + int(Ep(str(n // 5), len(str(n)))))) <= x)
@@ -89,6 +108,8 @@ def processKey(n, m=0):
     n = str(bSplit(bSplit(int(n) + int(pRotate(n)))))
     n = tDecimal(qRotate(str(n)), 10)
     return str(int(int(n) + int(a + b + '0' * (p-2))) + int(m))[-p:]
+
+def gChar(c): b = ''.join([x for x in string.printable[:90] if x not in '/\\`"\',_!#$%&()* +-=']) + '&()*$%/\\`"\',_!#'; return b[:c]
 
 def fDecimal(d, b):
     c, n, r, s = gChar(b), 1, d, ""
