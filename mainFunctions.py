@@ -1,3 +1,4 @@
+#22
 import math
 from random import seed, randint
 import string
@@ -7,21 +8,15 @@ sys.set_int_max_str_digits(0)
 
 def encryptData(n, k=0):
     n = toBytes(n)
-    hKey = fetchKey(n) if k < 1 else fetchKey(k)
-    key, b = tDecimal(hKey, 16), 1543
+    hKey, e = getB(fetchKey(n))
+    key, b = tDecimal(hKey, 16), e
     keys, n = [key] + [key := int(processKey(key)) for _ in range(9)], n + (key // b)
     n = pData(n, keys, b)
     return fDecimal(n, 62), hKey
 
-def decryptDataRaw(n, k):
-    key, b, n = tDecimal(k, 16), 1543, tDecimal(n, 62)
-    keys = [key] + [key := int(processKey(key)) for _ in range(9)]
-    n = dData(n, keys, b)
-    n = n - (key // b)
-    return n
-
 def decryptData(n, k):
-    key, b, n = tDecimal(k, 16), 1543, tDecimal(n, 62)
+    e = getE(k)
+    key, b, n = tDecimal(k, 16), e, tDecimal(n, 62)
     keys = [key] + [key := int(processKey(key)) for _ in range(9)]
     n = dData(n, keys, b)
     n = n - (key // b)
@@ -52,13 +47,26 @@ def checkData(n, i):
     n = sum(int(str(n)[i:i+80]) for i in range(0, len(str(n)), 80))
     return kSplit((int(qRotate(str(bSplit(n))) + processKey(n))), n)
 
-def toBytes(t): return fromAnyBase(' '.join(str(ord(c)) for c in t), 256)
-def fromBytes(b): return ''.join(chr(int(i)) for i in anyBase(b, 256).split())
+def toBytes(t):
+    b = b"\x01" + t.encode("utf-16-le", errors="surrogatepass")
+    return fromAnyBase(" ".join(str(x) for x in b), 256)
+
+def fromBytes(n):
+    b = bytes(int(i) for i in anyBase(n, 256).split())
+    if not b or b[0] != 1:
+        raise ValueError("byte sentinel missing")
+    b = b[1:]
+    return b.decode("utf-16-le", errors="surrogatepass")
+
+def anyBase(n, b):
+    if n == 0: return '0'
+    d=[]
+    while n: d.append(str(n%b)); n//=b
+    return ' '.join(d[::-1])
 
 def fetchKey(n): return manipulateKey(tDecimal(manipulateData(getKey(checkData(n+90, (n % 7) + 1), 79), n), 10))
 def manipulateKey(n): return fDecimal(tDecimal(hex(n)[2:], 16) + int(fDecimal(n, 16), 16), 16)[-63:-1]
 def getKey(n, x=78): return next(str(n) for _ in iter(int, 1) if len(str(n := (n // 8) + int(Ep(str(n // 5), len(str(n)))))) <= x)
-def anyBase(n, b): return '0' if n == 0 else ' '.join(str(n // b ** i % b) for i in range(int(math.log(n, b)), -1, -1))
 def fromAnyBase(n, b): return sum(int(c) * b ** i for i, c in enumerate(reversed(n.split(' '))))
 def gChar(c): b = ''.join([x for x in string.printable[:90] if x not in '/\\`"\',_!#$%&()* +-=']) + '&()*$%/\\`"\',_!#'; return b[:c]
 def generateSeries(s, n): seed(s); return ''.join(str(randint(0, 8)) for _ in range(n))
@@ -111,15 +119,97 @@ def tDecimal(c, b):
     v += sum(chars.index(ch) * (b ** i) for i, ch in enumerate(reversed(str(c))))
     return v + sum(b ** i for i in range(1, l))
 
-def baseSplit(n, k, b = 1543, y = 1):
-    m = 2 ** 16; nDigits = anyBase(n, b).split(); s = ' '.join(x for x in anyBase(k, m).split() if 2 <= len(x) <= 10) + ' '
+def baseSplit(n, k, b=8, y=1):
+    m = 2 ** 16
+    nDigits = anyBase(n, b).split()
+    s = ' '.join(x for x in anyBase(k, m).split() if 2 <= len(x) <= 10) + ' '
+
+    if not s.split():
+        s = f'{(k % (m - 2)) + 2} '
+
+    cap = (len(nDigits) + 2) * 40
+    loops = 0
+
     if y == 1:
-        while len(s.split()) < len(nDigits) + 1: last = int(s.split()[-1]); s += ' '.join(x for x in anyBase(k, last + m).split() if 2 <= len(x) <= 10) + ' '
-        z = s.split(); z0 = int(z[0]) % b; guard = (1 - z0) % b; nDigits = [str(guard)] + nDigits
+        while len(s.split()) < len(nDigits) + 1:
+            last = int(s.split()[-1])
+            s += ' '.join(x for x in anyBase(k, last + m).split() if 2 <= len(x) <= 10) + ' '
+            loops += 1
+            if loops > cap:
+                break
+
+        z = s.split()
+        if len(z) < len(nDigits) + 1:
+            need = len(nDigits) + 1 - len(z)
+            z += [z[-1]] * need
+
+        z0 = int(z[0]) % b
+        guard = (1 - z0) % b
+        nDigits = [str(guard)] + nDigits
         return fromAnyBase(' '.join(str((int(x) + int(zv)) % b) for x, zv in zip(nDigits, z)), b)
-    while len(s.split()) < len(nDigits): last = int(s.split()[-1]); s += ' '.join(x for x in anyBase(k, last + m).split() if 2 <= len(x) <= 10) + ' '
-    z = s.split(); outDigits = [str((int(x) - int(zv)) % b) for x, zv in zip(nDigits, z)]
+
+    while len(s.split()) < len(nDigits):
+        last = int(s.split()[-1])
+        s += ' '.join(x for x in anyBase(k, last + m).split() if 2 <= len(x) <= 10) + ' '
+        loops += 1
+        if loops > cap:
+            break
+
+    z = s.split()
+    if len(z) < len(nDigits):
+        need = len(nDigits) - len(z)
+        z += [z[-1]] * need
+
+    outDigits = [str((int(x) - int(zv)) % b) for x, zv in zip(nDigits, z)]
     return 0 if len(outDigits) <= 1 else fromAnyBase(' '.join(outDigits[1:]), b)
+
+def fold64(h):
+    h = ''.join(c for c in h.lower() if c in '0123456789abcdef')
+    if not h:
+        return '0' * 64
+    if len(h) < 64:
+        h = (h * ((64 // len(h)) + 1))
+        return h
+    out = [0] * 64
+    for i, ch in enumerate(h):
+        out[i % 64] ^= int(ch, 16)
+    return ''.join('0123456789abcdef'[x] for x in out)
+
+def getE(hex64):
+    x = hex64.lower().zfill(64)[-64:]
+    s4 = (str(int(x[:4], 16) + int(x[-4:], 16)).lstrip('0') or '0')[:4]
+    n = int(s4)
+    if n < 4096:
+        return n
+    if n % 2 == 0:
+        t = s4[:-1]
+        return int(t) + (100 if len(s4) > 1 and s4[-2] == "0" else 0)
+    t = s4[1:]
+    return int(t) + (100 if len(s4) > 1 and s4[1] == "0" else 0)
+
+def getB(hexStr):
+    h = fold64(hexStr)
+
+    f = int(h[:4], 16)
+    l = int(h[-4:], 16)
+    seed = ((f >> 8) ^ (l & 0xFF) ^ (f & 0xFF) ^ (l >> 8)) & 0xFF
+
+    mh = ''.join(f'{((int(h[i:i+2], 16) - seed) & 0xFF):02x}' for i in range(0, 64, 2))
+
+    mh = hex(int(mh, 16) + int(h, 16))[2:]
+
+    baseParam = int(mh[:4].zfill(4), 16)
+    nVal = int(mh, 16)
+    kVal = int(mh[-4:].zfill(4), 16)
+
+    splitVal = baseSplit(nVal, kVal, b=(baseParam & 4096) + 64, y=1)
+    splitHex = hex(splitVal)[2:]
+
+    sFull = hex(int(h, 16) + int(splitHex, 16))[2:]
+    s = fold64(sFull)
+
+    e = getE(s)
+    return s, e
 
 n = 'Andrew Lehti'
 n, k = encryptData(n)
