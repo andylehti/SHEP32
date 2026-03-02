@@ -6,9 +6,9 @@ import sys
 import re
 sys.set_int_max_str_digits(0)
 
-def encryptData(n, k=0, m=0):
+def encryptData(n, k=0):
     n = toBytes(n)
-    hKey = fetchKey(n) if k < 1 else (fDecimal(k, 16) if m == 1 and k >= 11100000 else fetchKey(k))
+    hKey = fetchKey(n) if k < 1 else fetchKey(k)
     key, b = tDecimal(hKey, 16), 1543
     keys, n = [key] + [key := int(processKey(key)) for _ in range(9)], n + (key // b)
     n = pData(n, keys, b)
@@ -53,19 +53,8 @@ def checkData(n, i):
     n = sum(int(str(n)[i:i+80]) for i in range(0, len(str(n)), 80))
     return kSplit((int(qRotate(str(bSplit(n))) + processKey(n))), n)
 
-#def toBytes(t): return fromAnyBase(' '.join(str(ord(c)) for c in t), 256)
-#def fromBytes(b): return ''.join(chr(int(i)) for i in anyBase(b, 256).split())
-
-def toBytes(t):
-    b = b"\x01" + t.encode("utf-16-le", errors="surrogatepass")
-    return fromAnyBase(" ".join(str(x) for x in b), 256)
-
-def fromBytes(n):
-    b = bytes(int(i) for i in anyBase(n, 256).split())
-    if not b or b[0] != 1:
-        raise ValueError("byte sentinel missing")
-    b = b[1:]
-    return b.decode("utf-16-le", errors="surrogatepass")
+def toBytes(t): return fromAnyBase(' '.join(str(ord(c)) for c in t), 256)
+def fromBytes(b): return ''.join(chr(int(i)) for i in anyBase(b, 256).split())
 
 def fetchKey(n): return manipulateKey(tDecimal(manipulateData(getKey(checkData(n+90, (n % 7) + 1), 79), n), 10))
 def manipulateKey(n): return fDecimal(tDecimal(hex(n)[2:], 16) + int(fDecimal(n, 16), 16), 16)[-63:-1]
@@ -83,7 +72,7 @@ def inverJect(s): s, p = (s[:-1], s[-1]) if len(s) % 2 else (s, ''); h = len(s) 
 def keySplit(n, k, y=1): m = str(k) if y == 1 else str(k)[::-1]; return [n := bSplit(n, int(d) + 2) for d in m][-1]
 def bSplit(s, f=4): s = bin(s)[3:]; return int('1' + ''.join(s[i:i+f][::-1] for i in range(0, len(s) - len(s) % f, f)) + s[len(s) - len(s) % f:], 2)
 def addSpace(s, x): return s[:s.rfind(' ')+1+(x+1)] + ' ' + s[s.rfind(' ')+1+(x+1):] if ' ' in s else s[:(x+1)] + ' ' + s[(x+1):]
-
+    
 def kSplit(s, k):
     s, k = bin(s)[3:], str(k)
     k = k.replace('0', ''); p = len(s) // sum(int(d) for n in k for d in str(n)) + len(k); k = k * p
@@ -123,12 +112,16 @@ def tDecimal(c, b):
     v += sum(chars.index(ch) * (b ** i) for i, ch in enumerate(reversed(str(c))))
     return v + sum(b ** i for i in range(1, l))
 
-def baseSplit(n, k, b=1543, y=1):
-    n, y, m = anyBase(n, b), 1 if y == 1 else -1, 2**16
-    sCounts, nCounts, s = 0, len((n).split()), ' '.join(x for x in anyBase(k, m).split() if 2 <= len(x) <= 10) + ' '
-    while sCounts < nCounts: s += ' '.join(x for x in anyBase(k, (int(s.split()[-1]) + m)).split() if 2 <= len(x) <= 10) + ' '; sCounts = len(s.split())
-    return fromAnyBase(' '.join(str((int(x) + (int(z)) * y) % int(b)) for x, z in zip(n.split(), s.split())), b)
-    
+def baseSplit(n, k, b = 1543, y = 1):
+    m = 2 ** 16; nDigits = anyBase(n, b).split(); s = ' '.join(x for x in anyBase(k, m).split() if 2 <= len(x) <= 10) + ' '
+    if y == 1:
+        while len(s.split()) < len(nDigits) + 1: last = int(s.split()[-1]); s += ' '.join(x for x in anyBase(k, last + m).split() if 2 <= len(x) <= 10) + ' '
+        z = s.split(); z0 = int(z[0]) % b; guard = (1 - z0) % b; nDigits = [str(guard)] + nDigits
+        return fromAnyBase(' '.join(str((int(x) + int(zv)) % b) for x, zv in zip(nDigits, z)), b)
+    while len(s.split()) < len(nDigits): last = int(s.split()[-1]); s += ' '.join(x for x in anyBase(k, last + m).split() if 2 <= len(x) <= 10) + ' '
+    z = s.split(); outDigits = [str((int(x) - int(zv)) % b) for x, zv in zip(nDigits, z)]
+    return 0 if len(outDigits) <= 1 else fromAnyBase(' '.join(outDigits[1:]), b)
+
 def cleanToken(t):
     return re.sub(r'\s+', '', t or '')
 
