@@ -106,9 +106,9 @@ def baseSplit(n, k, b=1543, y=1):
     sCounts, nCounts, s = 0, len((n).split()), ' '.join(x for x in anyBase(k, m).split() if 2 <= len(x) <= 10) + ' '
     while sCounts < nCounts: s += ' '.join(x for x in anyBase(k, (int(s.split()[-1]) + m)).split() if 2 <= len(x) <= 10) + ' '; sCounts = len(s.split())
     return fromAnyBase(' '.join(str((int(x) + (int(z)) * y) % int(b)) for x, z in zip(n.split(), s.split())), b)
-
-def sanitizeInput(t):
-    return re.sub(r'[^a-zA-Z0-9]', '', t)
+    
+def cleanToken(t):
+    return re.sub(r'\s+', '', t or '')
 
 st.set_page_config(page_title="SHEP-32: Series Hashing Encryption Protocol", page_icon="🔒")
 
@@ -152,46 +152,42 @@ with col3:
 if st.session_state.mode == 'Encrypt':
     st.title("Encryption:")
     s = st.text_area('Enter data to encrypt:', '', height=150)
-    if st.button("Encrypt Data"):
-        if s:
-            e, k = encryptData(s, k, m)
-            st.markdown("**Key:**")
-            st.markdown(f'{k}')
-            st.markdown("**Encrypted data:**")
-            st.markdown(f'{e}')
-            st.markdown("**Decrypted data:**")
-            st.html(f'<p style="white-space: pre-wrap; overflow-wrap: break-word; overflow: hidden;">{decryptData(e, k)}</p>')
-            st.divider()
-            st.markdown("**Combined Data + Key:**\n")
-            st.markdown("for demonstration purposes only")
-            combined = fDecimal(tDecimal(e, 62), 61) + 'Z' + fDecimal(tDecimal(k, 16), 61)
-            st.markdown(f'{combined}')
+    if st.button("Encrypt Data") and s:
+        e, k = encryptData(s)
+        st.markdown("**Key:**")
+        st.code(k)
+        st.markdown("**Encrypted data:**")
+        st.code(e)
+        st.markdown("**Decrypted data:**")
+        st.markdown(f"<div style='white-space: pre-wrap; overflow-wrap: break-word;'>{decryptData(e, k)}</div>", unsafe_allow_html=True)
+        st.divider()
+        st.markdown("**Combined Data + Key:**")
+        st.caption("for demonstration purposes only")
+        combined = fDecimal(tDecimal(e, 62), 61) + 'Z' + fDecimal(tDecimal(k, 16), 61)
+        st.code(combined)
 
 elif st.session_state.mode == 'Decrypt':
     st.title("Decryption:")
-    d = st.text_input("Enter data to decrypt:", "")
-    r = st.text_input("Enter key:", "")
-    d = sanitizeInput(d)
-    r = sanitizeInput(r)
+    d = cleanToken(st.text_input("Enter data to decrypt:", ""))
+    r = cleanToken(st.text_input("Enter key:", ""))
     if d and r:
         st.markdown("**Decrypted data:**")
-        st.html(f'<p style="white-space: pre-wrap; overflow-wrap: break-word; overflow: hidden;">{decryptData(d, r)}</p>')
+        st.markdown(f"<div style='white-space: pre-wrap; overflow-wrap: break-word;'>{decryptData(d, r)}</div>", unsafe_allow_html=True)
 
 elif st.session_state.mode == 'Combined Decryption':
     st.title("Combined String Decryption:")
-    q = st.text_input("Enter combined string data:", "")
-    q = sanitizeInput(q)
+    q = cleanToken(st.text_input("Enter combined string data:", ""))
     if 'Z' in q:
-        v, w = q.split('Z')
+        v, w = q.split('Z', 1)
         w = fDecimal(tDecimal(w, 61), 16)
         v = fDecimal(tDecimal(v, 61), 62)
         if v and w:
             st.markdown("**Decrypted data:**")
-            st.html(f'<p style="white-space: pre-wrap; overflow-wrap: break-word; overflow: hidden;">{decryptData(v, w)}</p>')
+            st.markdown(f"<div style='white-space: pre-wrap; overflow-wrap: break-word;'>{decryptData(v, w)}</div>", unsafe_allow_html=True)
 
-footer = f"""
+footer = """
 <div class="footer">
-    <p>GitHub Repository: <a href="https://github.com/andylehti/SHEP32" target="_blank">SHEP-32</a>
+    <p>GitHub Repository: <a href="https://github.com/andylehti/SHEP32" target="_blank">SHEP-32</a></p>
 </div>
 """
 st.markdown(footer, unsafe_allow_html=True)
