@@ -5,9 +5,9 @@ import sys
 import re
 sys.set_int_max_str_digits(0)
 
-def encryptData(n, k=0, m=0):
+def encryptData(n, k=0):
     n = toBytes(n)
-    hKey = fetchKey(n) if k < 1 else (fDecimal(k, 16) if m == 1 and k >= 11100000 else fetchKey(k))
+    hKey = fetchKey(n) if k < 1 else fetchKey(k)
     key, b = tDecimal(hKey, 16), 1543
     keys, n = [key] + [key := int(processKey(key)) for _ in range(9)], n + (key // b)
     n = pData(n, keys, b)
@@ -45,8 +45,8 @@ def checkData(n, i):
     n = sum(int(str(n)[i:i+80]) for i in range(0, len(str(n)), 80))
     return kSplit((int(qRotate(str(bSplit(n))) + processKey(n))), n)
 
-def toBytes(t): return fromAnyBase(' '.join(str(ord(c)) for c in t), 256)
-def fromBytes(b): return ''.join(chr(int(i)) for i in anyBase(b, 256).split())
+def toBytes(t): return fromAnyBase(' '.join(str(c) for c in t.encode('utf-16-le')), 256)
+def fromBytes(b): return bytes(int(i) for i in anyBase(b, 256).split()).decode('utf-16-le')
 def fetchKey(n): return manipulateKey(tDecimal(manipulateData(getKey(checkData(n+90, (n % 7) + 1), 79), n), 10))
 def manipulateKey(n): return fDecimal(tDecimal(hex(n)[2:], 16) + int(fDecimal(n, 16), 16), 16)[-63:-1]
 def getKey(n, x=78): return next(str(n) for _ in iter(int, 1) if len(str(n := (n // 8) + int(Ep(str(n // 5), len(str(n)))))) <= x)
@@ -90,8 +90,6 @@ def processKey(n, m=0):
     n = tDecimal(qRotate(str(n)), 10)
     return str(int(int(n) + int(a + b + '0' * (p-2))) + int(m))[-p:]
 
-def gChar(c): b = ''.join([x for x in string.printable[:90] if x not in '/\\`"\',_!#$%&()* +-=']) + '&()*$%/\\`"\',_!#'; return b[:c]
-
 def fDecimal(d, b):
     c, n, r, s = gChar(b), 1, d, ""
     while r >= b ** n: r -= b ** n; n += 1
@@ -108,10 +106,9 @@ def baseSplit(n, k, b=1543, y=1):
     sCounts, nCounts, s = 0, len((n).split()), ' '.join(x for x in anyBase(k, m).split() if 2 <= len(x) <= 10) + ' '
     while sCounts < nCounts: s += ' '.join(x for x in anyBase(k, (int(s.split()[-1]) + m)).split() if 2 <= len(x) <= 10) + ' '; sCounts = len(s.split())
     return fromAnyBase(' '.join(str((int(x) + (int(z)) * y) % int(b)) for x, z in zip(n.split(), s.split())), b)
-
+ 
 n = 'Andrew Lehti'
-k = 8657523846634763573364787454663748570
-n, k = encryptData(n, k, 0)
+n, k = encryptData(n)
 print(n, k)
 n = decryptData(n, k)
 print(n)
