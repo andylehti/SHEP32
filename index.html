@@ -1,0 +1,1678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SHEP-32 Encryption Protocol</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-zinc-950 text-zinc-300 font-sans selection:bg-cyan-500/30">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // --- INLINE ICONS ---
+        const Shield = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>;
+        const Copy = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>;
+        const Check = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>;
+        const Lock = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>;
+        const Unlock = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>;
+        const KeyIcon = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path></svg>;
+        const Download = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>;
+        const Upload = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>;
+        const Info = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>;
+        const Eye = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>;
+        const EyeOff = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>;
+        const X = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>;
+        const FileText = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>;
+        const RefreshCw = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>;
+        const Github = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>;
+        
+        /**
+         * CORE LOGIC - SHEP-32 MATH UTILS
+         */
+        function bigIntPow(base, exp) {
+            let b = BigInt(base);
+            let e = BigInt(exp);
+            let res = BigInt(1);
+            while (e > BigInt(0)) {
+                if (e % BigInt(2) === BigInt(1)) res *= b;
+                b *= b;
+                e /= BigInt(2);
+            }
+            return res;
+        }
+
+        function pyMod(n, m) {
+            const bn = BigInt(n);
+            const bm = BigInt(m);
+            return ((bn % bm) + bm) % bm;
+        }
+
+        const PI = 3.141592653589793;
+        const gCharBase = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.:;<>?@[]^&()*$%/\\`\"',_!#";
+        const ten79 = bigIntPow(10, 79);
+        const digits16 = "0123456789abcdef";
+        const tDecCache = new Map();
+
+        function gChar(c) { return gCharBase.slice(0, Number(c)); }
+
+        function splitWs(s) {
+            const str = String(s);
+            const words = [];
+            let cur = "";
+            for (let i = 0; i < str.length; i++) {
+                const ch = str[i];
+                if (ch <= " ") {
+                    if (cur.length) { words.push(cur); cur = ""; }
+                } else { cur += ch; }
+            }
+            if (cur.length) words.push(cur);
+            return words;
+        }
+
+        function parseDec(s) {
+            if (!s) return BigInt(0);
+            let res = BigInt(0);
+            for (let i = 0; i < s.length; i++) {
+                const d = s.charCodeAt(i) - 48;
+                res = res * BigInt(10) + BigInt(d);
+            }
+            return res;
+        }
+
+        function parseHex(s) {
+            let res = BigInt(0);
+            const clean = String(s).toLowerCase();
+            for (let i = 0; i < clean.length; i++) {
+                const o = clean.charCodeAt(i);
+                let v = (o >= 48 && o <= 57) ? o - 48 : 10 + (o - 97);
+                res = res * BigInt(16) + BigInt(v);
+            }
+            return res;
+        }
+
+        function toHexSmall(n) {
+            let x = BigInt(n);
+            if (x === BigInt(0)) return "0";
+            let out = "";
+            while (x > BigInt(0)) {
+                out = digits16[Number(x % BigInt(16))] + out;
+                x /= BigInt(16);
+            }
+            return out;
+        }
+
+        function hexLower(n) {
+            let x = BigInt(n);
+            if (x === BigInt(0)) return "0";
+            const base = bigIntPow(16, 6);
+            const chunks = [];
+            while (x > BigInt(0)) { chunks.push(x % base); x /= base; }
+            chunks.reverse();
+            let out = toHexSmall(chunks[0]);
+            for (let i = 1; i < chunks.length; i++) {
+                out += toHexSmall(chunks[i]).padStart(6, "0");
+            }
+            return out;
+        }
+
+        function toBinSmall(n) {
+            let x = BigInt(n);
+            if (x === BigInt(0)) return "0";
+            let out = "";
+            while (x > BigInt(0)) {
+                out = (x % BigInt(2) === BigInt(0) ? "0" : "1") + out;
+                x /= BigInt(2);
+            }
+            return out;
+        }
+
+        function toBin(n) {
+            let x = BigInt(n);
+            if (x === BigInt(0)) return "0";
+            const base = bigIntPow(2, 30);
+            const chunks = [];
+            while (x > BigInt(0)) { chunks.push(x % base); x /= base; }
+            chunks.reverse();
+            let out = toBinSmall(chunks[0]);
+            for (let i = 1; i < chunks.length; i++) {
+                out += toBinSmall(chunks[i]).padStart(30, "0");
+            }
+            return out;
+        }
+
+        function binTail(n) {
+            const b = toBin(BigInt(n));
+            return b.length <= 1 ? "" : b.slice(1);
+        }
+
+        function parseBase2(s) {
+            let res = BigInt(0);
+            for (let ch of s) {
+                res = res * BigInt(2) + (ch === "1" ? BigInt(1) : BigInt(0));
+            }
+            return res;
+        }
+
+        class DeterministicRng32 {
+            constructor(seedValue = BigInt(1)) {
+                this.n = 624;
+                this.m = 397;
+                this.matrixA = BigInt(0x9908b0df);
+                this.upperMask = BigInt(0x80000000);
+                this.lowerMask = BigInt(0x7fffffff);
+                this.mt = new Array(this.n).fill(BigInt(0));
+                this.mti = this.n + 1;
+                this.setSeed(seedValue);
+            }
+            setSeed(seedValue) {
+                let x = BigInt(seedValue);
+                if (x < BigInt(0)) x = -x;
+                const key = [];
+                const base = BigInt(4294967296);
+                while (x > BigInt(0)) { key.push(x % base); x /= base; }
+                if (!key.length) key.push(BigInt(0));
+                this.initByArray(key);
+            }
+            initGenrand(s) {
+                const mask = BigInt(0xFFFFFFFF);
+                this.mt[0] = BigInt(s) & mask;
+                for (let i = 1; i < this.n; i++) {
+                    const prev = this.mt[i - 1];
+                    const v = prev ^ (prev >> BigInt(30));
+                    this.mt[i] = (BigInt(1812433253) * v + BigInt(i)) & mask;
+                }
+                this.mti = this.n;
+            }
+            initByArray(initKey) {
+                const mask = BigInt(0xFFFFFFFF);
+                this.initGenrand(BigInt(19650218));
+                let i = 1, j = 0;
+                const keyLength = initKey.length;
+                for (let k = Math.max(this.n, keyLength); k > 0; k--) {
+                    const v = this.mt[i - 1] ^ (this.mt[i - 1] >> BigInt(30));
+                    this.mt[i] = ((this.mt[i] ^ (v * BigInt(1664525))) + initKey[j] + BigInt(j)) & mask;
+                    i++; j++;
+                    if (i >= this.n) { this.mt[0] = this.mt[this.n - 1]; i = 1; }
+                    if (j >= keyLength) j = 0;
+                }
+                for (let k = this.n - 1; k > 0; k--) {
+                    const v = this.mt[i - 1] ^ (this.mt[i - 1] >> BigInt(30));
+                    this.mt[i] = ((this.mt[i] ^ (v * BigInt(1566083941))) - BigInt(i)) & mask;
+                    i++;
+                    if (i >= this.n) { this.mt[0] = this.mt[this.n - 1]; i = 1; }
+                }
+                this.mt[0] = BigInt(0x80000000);
+                this.mti = this.n;
+            }
+            nextU32() {
+                const mask = BigInt(0xFFFFFFFF);
+                if (this.mti >= this.n) {
+                    for (let kk = 0; kk < this.n - this.m; kk++) {
+                        const y = (this.mt[kk] & this.upperMask) | (this.mt[kk + 1] & this.lowerMask);
+                        const twist = (y % BigInt(2) !== BigInt(0)) ? this.matrixA : BigInt(0);
+                        this.mt[kk] = (this.mt[kk + this.m] ^ (y >> BigInt(1)) ^ twist) & mask;
+                    }
+                    for (let kk = this.n - this.m; kk < this.n - 1; kk++) {
+                        const y = (this.mt[kk] & this.upperMask) | (this.mt[kk + 1] & this.lowerMask);
+                        const twist = (y % BigInt(2) !== BigInt(0)) ? this.matrixA : BigInt(0);
+                        this.mt[kk] = (this.mt[kk + (this.m - this.n)] ^ (y >> BigInt(1)) ^ twist) & mask;
+                    }
+                    const yLast = (this.mt[this.n - 1] & this.upperMask) | (this.mt[0] & this.lowerMask);
+                    const twistLast = (yLast % BigInt(2) !== BigInt(0)) ? this.matrixA : BigInt(0);
+                    this.mt[this.n - 1] = (this.mt[this.m - 1] ^ (yLast >> BigInt(1)) ^ twistLast) & mask;
+                    this.mti = 0;
+                }
+                let y = this.mt[this.mti++];
+                y ^= (y >> BigInt(11));
+                y ^= (y << BigInt(7)) & BigInt(0x9d2c5680);
+                y ^= (y << BigInt(15)) & BigInt(0xefc60000);
+                y ^= (y >> BigInt(18));
+                return y & mask;
+            }
+            getRandBits(k) {
+                if (k <= 0) return BigInt(0);
+                const words = Math.floor((k + 31) / 32);
+                let x = BigInt(0);
+                const base = BigInt(4294967296);
+                for (let i = 0; i < words; i++) x = x * base + this.nextU32();
+                const extra = words * 32 - k;
+                if (extra) x /= bigIntPow(2, extra);
+                return x;
+            }
+            randint(a, b) {
+                return BigInt(a) + this.randBelow(BigInt(b) - BigInt(a) + BigInt(1));
+            }
+            randBelow(n) {
+                const k = BigInt(n).toString(2).length;
+                while (true) {
+                    const r = this.getRandBits(k);
+                    if (r < BigInt(n)) return r;
+                }
+            }
+            shuffle(arr) {
+                for (let i = arr.length - 1; i > 0; i--) {
+                    const j = Number(this.randBelow(i + 1));
+                    [arr[i], arr[j]] = [arr[j], arr[i]];
+                }
+                return arr;
+            }
+        }
+
+        // --- PYTHON-COMPATIBLE BYTE SHIFTING ---
+        function toBytesPython(t) {
+            let bytes = [1]; // Sentinel 0x01
+            if (typeof t === 'string') {
+                for (let i = 0; i < t.length; i++) {
+                    let code = t.charCodeAt(i);
+                    bytes.push(code & 0xFF);
+                    bytes.push((code >> 8) & 0xFF);
+                }
+            } else {
+                // Assuming t is Uint8Array
+                for (let i = 0; i < t.length; i++) bytes.push(t[i]);
+            }
+            let res = 0n;
+            for (let i = 0; i < bytes.length; i++) {
+                res = (res << 8n) | BigInt(bytes[i]);
+            }
+            return res;
+        }
+
+        function fromBytesPython(n) {
+            let hex = n.toString(16);
+            if (hex.length % 2 !== 0) hex = '0' + hex;
+            let bytes = new Uint8Array(hex.length / 2);
+            for (let i = 0; i < hex.length; i += 2) {
+                bytes[i/2] = parseInt(hex.slice(i, i+2), 16);
+            }
+            if (bytes[0] !== 1) throw new Error("Decryption failed: corrupted data or invalid key.");
+            return bytes.slice(1);
+        }
+
+        // --- SHEP32 CORE TRANSLATIONS ---
+        function fastAnyBaseList(val, b) {
+            let v = BigInt(val);
+            const bN = BigInt(b);
+            if (v === BigInt(0)) return ["0"];
+            const powers = [[1, bN]];
+            while (powers[powers.length - 1][1] <= v) {
+                const last = powers[powers.length - 1];
+                powers.push([last[0] * 2, last[1] * last[1]]);
+            }
+            let n = 0;
+            let curBn = BigInt(1);
+            for (let i = powers.length - 1; i >= 0; i--) {
+                const [pN, pVal] = powers[i];
+                if (curBn * pVal <= v) { curBn *= pVal; n += pN; }
+            }
+            n += 1;
+            function convert(v, targetLen) {
+                if (targetLen <= 500) {
+                    const out = [];
+                    for (let i = 0; i < targetLen; i++) { out.push(String(v % bN)); v /= bN; }
+                    return out.reverse();
+                }
+                const half = Math.floor(targetLen / 2);
+                const divisor = bigIntPow(bN, half);
+                return convert(v / divisor, targetLen - half).concat(convert(v % divisor, half));
+            }
+            const res = convert(v, n);
+            while (res.length > 1 && res[0] === "0") res.shift();
+            return res;
+        }
+
+        function fromAnyBase(n, b) {
+            const bN = BigInt(b);
+            const parts = Array.isArray(n) ? n : splitWs(n);
+            if (!parts.length) return BigInt(0);
+            const ints = parts.map(p => BigInt(p));
+            function evalRange(start, end) {
+                if (end - start <= 200) {
+                    let res = BigInt(0);
+                    for (let i = start; i < end; i++) res = res * bN + ints[i];
+                    return res;
+                }
+                const mid = Math.floor((start + end) / 2);
+                return evalRange(start, mid) * bigIntPow(bN, end - mid) + evalRange(mid, end);
+            }
+            return evalRange(0, ints.length);
+        }
+
+        function fastBaseConvert(val, b, padTo, charset) {
+            const bN = BigInt(b);
+            if (padTo <= 500) {
+                const out = [];
+                let v = BigInt(val);
+                for (let i = 0; i < padTo; i++) { out.push(charset[Number(v % bN)]); v /= bN; }
+                return out.reverse().join("");
+            }
+            const half = Math.floor(padTo / 2);
+            const divisor = bigIntPow(bN, half);
+            return fastBaseConvert(val / divisor, b, padTo - half, charset) + fastBaseConvert(val % divisor, b, half, charset);
+        }
+
+        function fDecimal(d, b) {
+            const dN = BigInt(d);
+            const bN = BigInt(b);
+            const c = gChar(b);
+            if (b === 1) return c[0].repeat(Number(dN + BigInt(1)));
+            const target = dN * (bN - BigInt(1)) + bN;
+            const powers = [[1, bN]];
+            while (powers[powers.length - 1][1] <= target) {
+                const last = powers[powers.length - 1];
+                powers.push([last[0] * 2, last[1] * last[1]]);
+            }
+            let n = 0;
+            let curBn = BigInt(1);
+            for (let i = powers.length - 1; i >= 0; i--) {
+                const [pN, pVal] = powers[i];
+                if (curBn * pVal <= target) { curBn *= pVal; n += pN; }
+            }
+            const geomSum = n > 0 ? (bigIntPow(bN, n) - bN) / (bN - BigInt(1)) : BigInt(0);
+            const r = dN - geomSum;
+            return n === 0 ? "" : fastBaseConvert(r, b, n, c);
+        }
+
+        function tDecimal(c, b) {
+            const s = String(c), l = s.length, bN = BigInt(b);
+            if (b === 10) return parseDec(s) + (l > 1 ? (bigIntPow(10, l) - BigInt(10)) / BigInt(9) : BigInt(0));
+            if (b === 16) return parseHex(s) + (l > 1 ? (bigIntPow(16, l) - BigInt(16)) / BigInt(15) : BigInt(0));
+            if (!tDecCache.has(b)) tDecCache.set(b, Object.fromEntries(gChar(b).split('').map((ch, i) => [ch, BigInt(i)])));
+            const charMap = tDecCache.get(b);
+            function evalRange(start, end) {
+                if (end - start <= 200) {
+                    let res = BigInt(0);
+                    for (let i = start; i < end; i++) res = res * bN + charMap[s[i]];
+                    return res;
+                }
+                const mid = Math.floor((start + end) / 2);
+                return evalRange(start, mid) * bigIntPow(bN, end - mid) + evalRange(mid, end);
+            }
+            const v = evalRange(0, l);
+            const geomSum = (b > 1 && l > 1) ? (bigIntPow(bN, l) - bN) / (bN - BigInt(1)) : (l > 1 && b === 1 ? BigInt(l - 1) : BigInt(0));
+            return v + geomSum;
+        }
+
+        function generateSeries(s, n) {
+            const r = new DeterministicRng32(BigInt(s));
+            let out = "";
+            for (let i = 0; i < n; i++) out += String(r.randint(0, 8));
+            return out;
+        }
+
+        function manipulateData(s, c) {
+            const sStr = String(s);
+            const k = generateSeries(c, sStr.length);
+            let out = "";
+            for (let i = 0; i < sStr.length; i++) {
+                const val = (sStr.charCodeAt(i) + k.charCodeAt(i) - 96) % 10;
+                out += String.fromCharCode(val + 48);
+            }
+            return out;
+        }
+
+        function inverseData(s, c) {
+            const sStr = String(s);
+            const k = generateSeries(c, sStr.length);
+            let out = "";
+            for (let i = 0; i < sStr.length; i++) {
+                let val = (sStr.charCodeAt(i) - k.charCodeAt(i)) % 10;
+                if (val < 0) val += 10;
+                out += String.fromCharCode(val + 48);
+            }
+            return out;
+        }
+
+        function qRotate(s) { return s.slice(5) + s.slice(2, 5).split("").reverse().join("") + s.slice(0, 2); }
+        function pRotate(s) { return s.slice(-2) + s.slice(-5, -2).split("").reverse().join("") + s.slice(0, -5); }
+
+        function interject(s) {
+            const str = String(s);
+            const p = str.length % 2 !== 0 ? str[str.length - 1] : "";
+            const sCore = str.length % 2 !== 0 ? str.slice(0, -1) : str;
+            const h = Math.floor(sCore.length / 2);
+            let out = "";
+            for (let i = 0; i < h; i++) out += sCore[i] + sCore[i + h];
+            return out + p;
+        }
+
+        function inverJect(s) {
+            const str = String(s);
+            const p = str.length % 2 !== 0 ? str[str.length - 1] : "";
+            const sCore = str.length % 2 !== 0 ? str.slice(0, -1) : str;
+            let evens = "", odds = "";
+            for (let i = 0; i < sCore.length; i++) {
+                if (i % 2 === 0) evens += sCore[i];
+                else odds += sCore[i];
+            }
+            return evens + odds + p;
+        }
+
+        function bSplit(s, f = 4) {
+            const bStr = binTail(s), l = bStr.length, rem = l % f;
+            const parts = ["1"];
+            for (let i = 0; i < l - rem; i += f) parts.push(bStr.slice(i, i + f).split("").reverse().join(""));
+            if (rem) parts.push(bStr.slice(l - rem));
+            return parseBase2(parts.join(""));
+        }
+
+        function kSplit(s, k) {
+            const sBin = binTail(s), kStr = String(k).replace(/0/g, "");
+            if (!kStr) return parseBase2("1" + sBin.split("").reverse().join(""));
+            const kDigits = kStr.split("").map(d => parseInt(d) + 1);
+            const kLen = kDigits.length, sLen = sBin.length;
+            let chunks = [], idx = 0, kIdx = 0;
+            while (idx < sLen) {
+                const step = kDigits[kIdx % kLen];
+                chunks.push(sBin.slice(idx, idx + step).split("").reverse().join(""));
+                idx += step; kIdx++;
+            }
+            return parseBase2("1" + chunks.join(""));
+        }
+
+        function keySplit(n, k, y = 1) {
+            let m = y === 1 ? String(k) : String(k).split('').reverse().join('');
+            let res = BigInt(n);
+            for (let i = 0; i < m.length; i++) {
+                res = bSplit(res, parseInt(m[i]) + 2);
+            }
+            return res;
+        }
+
+        function baseSplit(n, k, b = 8, y = 1) {
+            const bN = BigInt(b), m = 65536;
+            let nDigits = fastAnyBaseList(n, b);
+            let z = fastAnyBaseList(k, m).filter(x => x.length >= 2 && x.length <= 10);
+            if (!z.length) z = [String(Number(BigInt(k) % BigInt(m - 2)) + 2)];
+            const targetLen = (y === 1) ? nDigits.length + 1 : nDigits.length;
+            let loops = 0;
+            while (z.length < targetLen) {
+                const nextK = BigInt(z[z.length - 1]) + BigInt(m);
+                z.push(...fastAnyBaseList(nextK, m).filter(x => x.length >= 2 && x.length <= 10));
+                if (++loops > 1000) break;
+            }
+            if (z.length < targetLen) z.push(...new Array(targetLen - z.length).fill(z[z.length - 1]));
+            if (y === 1) {
+                const guard = pyMod(BigInt(1) - (BigInt(z[0]) % bN), bN);
+                nDigits = [String(guard)].concat(nDigits);
+                return fromAnyBase(nDigits.map((x, i) => String(pyMod(BigInt(x) + BigInt(z[i]), bN))), b);
+            }
+            const outDigits = nDigits.map((x, i) => String(pyMod(BigInt(x) - BigInt(z[i]), bN)));
+            return outDigits.length <= 1 ? BigInt(0) : fromAnyBase(outDigits.slice(1), b);
+        }
+
+        function Ap(n, m, p) { return (BigInt(n) * BigInt(m)).toString().slice(0, p); }
+        function Bp(n, p) {
+            const n0 = n.charCodeAt(0) - 48;
+            let out = "";
+            for (let i = 0; i < p; i++) out += String((n.charCodeAt(i % n.length) - 48 + n0) % 10);
+            return out;
+        }
+        function Cp(n, m, p) { return (BigInt(n) * BigInt(n.slice(0, 3 % n.length))).toString().slice(0, p); }
+        function Dp(n, m, p) {
+            let out = "";
+            for (let i = 0; i < p; i++) out += Math.abs((n.charCodeAt(i % n.length) - 48) * (m.charCodeAt(i % m.length) - 48));
+            return out.slice(0, p);
+        }
+
+        function Ep(n, p) {
+            let total = BigInt(0);
+            const ln = n.length;
+            for (let i = 0; i < p; i++) {
+                const a = (n.charCodeAt(i % ln) - 48) + 1;
+                const b = (n.charCodeAt((i + 1) % ln) - 48) + 1;
+                const v = PI * (1 / a / b);
+                const frac = v - Math.floor(v);
+                let sFrac = String(frac);
+                if (sFrac === "0") sFrac = "0.0";
+                else if (!sFrac.includes('.')) sFrac = sFrac + ".0";
+                const token = sFrac.slice(2);
+                total += token ? BigInt(token) : BigInt(0);
+            }
+            return total.toString().slice(-p);
+        }
+
+        function processKey(n, m = 0) {
+            let ns = String(n), ms = m ? String(m) : String(n);
+            const p = ns.length, r = parseInt(ns[0]);
+            const tIdx = (ms.length > r) ? parseInt(ms[r]) % p : p - 1;
+            const t = parseInt(ns[tIdx]);
+            const a = (r + t) % 6, b = pyMod(r - t, 6);
+            let res = (a === 0) ? Ap(ns, ms, p) : (a === 1) ? Bp(ns, p) : (a === 2) ? Cp(ns, ms, p) : (a === 3) ? Dp(ns, ms, p) : (a === 4) ? Ep(ns, p) : Ap(Bp(Cp(Dp(Ep(ns, p), ms, p), ms, p), p), ms, p);
+            res = (Number(b) === 0) ? Cp(res, ms, p) : (Number(b) === 1) ? Dp(res, ms, p) : (Number(b) === 2) ? Ap(Bp(Cp(Dp(Ep(res, p), ms, p), ms, p), p), ms, p) : (Number(b) === 3) ? Bp(res, p) : (Number(b) === 4) ? Ap(res, ms, p) : Ap(Bp(Cp(Dp(Ep(res, p), ms, p), ms, p), p), ms, p);
+            const a2 = res.split("").find(x => x !== "0" && !isNaN(x)) || "2";
+            const b2 = res.slice(1).split("").find(x => x !== "0" && !isNaN(x)) || "3";
+            let folded = String(bSplit(bSplit(BigInt(res) + BigInt(pRotate(res)))));
+            let finalNum = tDecimal(qRotate(folded), 10) + BigInt(a2 + b2 + "0".repeat(p - 2));
+            return (finalNum + BigInt(ms)).toString().slice(-p);
+        }
+
+        function checkData(n, i) {
+            let nv = BigInt(n), iv = BigInt(i);
+            while (nv < ten79) { nv *= BigInt(3); nv += iv; iv += iv; }
+            const s = nv.toString();
+            let acc = BigInt(0);
+            for (let j = 0; j < s.length; j += 80) acc += parseDec(s.slice(j, j + 80));
+            return kSplit(BigInt(qRotate(String(bSplit(acc))) + processKey(acc)), acc);
+        }
+
+        function getKey(n, x = 78) {
+            let nv = BigInt(n);
+            while (true) {
+                nv = (nv / BigInt(8)) + BigInt(Ep((nv / BigInt(5)).toString(), nv.toString().length));
+                if (nv.toString().length <= x) return nv.toString();
+            }
+        }
+
+        function fold64(h) {
+            let s = String(h).toLowerCase().replace(/[^0-9a-f]/g, "");
+            if (!s) return "0".repeat(64);
+            if (s.length < 64) {
+                return s.repeat(Math.floor(64 / s.length) + 1);
+            }
+            const out = new Array(64).fill(0);
+            for (let i = 0; i < s.length; i++) out[i % 64] ^= parseInt(s[i], 16);
+            return out.map((x) => digits16[x]).join("");
+        }
+
+        function getE(hex64) {
+            const x = hex64.toLowerCase().padStart(64, '0').slice(-64);
+            const s4 = (parseHex(x.slice(0, 4)) + parseHex(x.slice(-4))).toString().replace(/^0+/, "") || "0";
+            const s4f = s4.slice(0, 4);
+            const n = Number(parseDec(s4f));
+            if (n < 4096) return n;
+            if (n % 2 === 0) return Number(parseDec(s4f.slice(0, -1) || "0")) + (s4f.length > 1 && s4f[s4f.length - 2] === '0' ? 100 : 0);
+            return Number(parseDec(s4f.slice(1) || "0")) + (s4f.length > 1 && s4f[1] === '0' ? 100 : 0);
+        }
+
+        function hashKey(nBytes) {
+            const cd = checkData(nBytes + 90n, (nBytes % 7n) + 1n);
+            const gk = getKey(BigInt(cd), 79);
+            const md = manipulateData(gk, nBytes);
+            const tk = tDecimal(md, 10);
+            const manipulated = fDecimal(tDecimal(hexLower(tk), 16) + parseHex(fDecimal(tk, 16)), 16).slice(-63, -1);
+            const h = fold64(manipulated);
+            const f = parseHex(h.slice(0, 4)), l = parseHex(h.slice(-4));
+            const seedVal = Number((((f >> 8n) ^ (l & 255n) ^ (f & 255n) ^ (l >> 8n)) & 255n));
+            let mh = "";
+            for (let i = 0; i < 64; i += 2) {
+                const byte = pyMod(parseHex(h.slice(i, i + 2)) - BigInt(seedVal), 256);
+                mh += digits16[Number(byte / 16n)] + digits16[Number(byte % 16n)];
+            }
+            const mhVal = hexLower(parseHex(mh) + parseHex(h));
+            const baseParam = parseHex(mhVal.slice(0, 4).padStart(4, "0"));
+            const splitVal = baseSplit(parseHex(mhVal), parseHex(mhVal.slice(-4).padStart(4, "0")), Number((baseParam & 4096n) + 64n), 1);
+            const sFull = hexLower(parseHex(h) + parseHex(hexLower(splitVal)));
+            const finalH = fold64(sFull);
+            return [finalH, getE(finalH)];
+        }
+
+        function generatePKey(n = "") {
+            if (typeof n === 'string' && n.trim() !== "") {
+                return hashKey(toBytesPython(n))[0].toLowerCase();
+            }
+            const chars = gChar(62);
+            const seedVal = BigInt(Math.floor(Math.random() * 0xFFFFFFFF)) ^ BigInt(Date.now());
+            const r = new DeterministicRng32(seedVal);
+            const ln = Number(r.randint(64, 256));
+            let sArr = [];
+            for (let i = 0; i < ln; i++) sArr.push(chars[Number(r.randBelow(62))]);
+            r.shuffle(sArr);
+            const base62 = sArr.join("");
+            return hashKey(tDecimal(base62, 62))[0].toLowerCase();
+        }
+
+        function pData(n, keys, b) {
+            let res = BigInt(n);
+            const bN = BigInt(b);
+            for (let i = 0; i < keys.length; i++) {
+                let key = keys[i];
+                res = keySplit(res, key, 1);
+                res = tDecimal(manipulateData(res.toString(), key), 10);
+                res = baseSplit(res, key, Number(bN), 1);
+                res = kSplit(res, key.toString());
+                if (parseInt(key.toString()[0]) % 2 === 1) {
+                    res = BigInt(interject(res.toString()));
+                }
+            }
+            return res;
+        }
+
+        function dData(n, keys, b) {
+            let res = BigInt(n);
+            const bN = BigInt(b);
+            for (let i = keys.length - 1; i >= 0; i--) {
+                let key = keys[i];
+                if (parseInt(key.toString()[0]) % 2 === 1) {
+                    res = BigInt(inverJect(res.toString()));
+                }
+                res = kSplit(res, key.toString());
+                let bs = baseSplit(res, key, Number(bN), 0);
+                let fDecStr = fDecimal(bs, 10);
+                let invStr = inverseData(fDecStr, key);
+                res = keySplit(BigInt(invStr), key, 0);
+            }
+            return res;
+        }
+
+        function encryptData(nRaw, k = "") {
+            let n = toBytesPython(nRaw);
+            let hKey, e;
+            if (k) {
+                hKey = k.toLowerCase();
+                e = getE(hKey);
+            } else {
+                const hkTuple = hashKey(n);
+                hKey = hkTuple[0];
+                e = hkTuple[1];
+            }
+            let key0 = tDecimal(hKey, 16);
+            let b = e;
+
+            let keys = [key0];
+            let key = key0;
+            for (let i = 0; i < 9; i++) {
+                key = BigInt(processKey(key));
+                keys.push(key);
+            }
+
+            n = n + (key / BigInt(b));
+            n = pData(n, keys, b);
+            return { c: fDecimal(n, 62), k: hKey };
+        }
+
+        function decryptData(cStr, k) {
+            let hKey = k.toLowerCase();
+            let e = getE(hKey);
+            let key0 = tDecimal(hKey, 16);
+            let b = e;
+            let n = tDecimal(cStr, 62);
+
+            let keys = [key0];
+            let key = key0;
+            for (let i = 0; i < 9; i++) {
+                key = BigInt(processKey(key));
+                keys.push(key);
+            }
+
+            n = dData(n, keys, b);
+            n = n - (key / BigInt(b));
+            return fromBytesPython(n);
+        }
+
+        // --- UTILS ---
+        const DOC_EXTS = ['.pdf', '.doc', '.docx', '.txt', '.rtf', '.odt', '.md', '.csv', '.xls', '.xlsx'];
+        const MAX_FILE_SIZE = 101 * 1024; // 101KB hard cap
+        const KEY_HEADER = "-----BEGIN SHEP32 KEY-----\n";
+        const KEY_FOOTER = "\n-----END SHEP32 KEY-----";
+        const META_HEADER = "SHEP32FILEv1\n";
+        const META_DELIM = "\n---\n";
+
+        function downloadBlob(data, filename, type = 'application/octet-stream') {
+            const blob = new Blob([data], { type });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // --- UI COMPONENTS ---
+        const InfoTooltip = ({ text }) => (
+            <div className="group relative inline-flex items-center ml-2 align-middle">
+                <Info className="w-3.5 h-3.5 text-zinc-500 cursor-help hover:text-cyan-400 transition-colors" />
+                <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover:block w-56 p-2 bg-zinc-800 text-zinc-200 text-[10px] rounded-md shadow-xl border border-zinc-700 z-50 text-center pointer-events-none font-mono">
+                    {text}
+                    <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-zinc-800"></div>
+                </div>
+            </div>
+        );
+
+        const ConfirmModal = ({ isOpen, onClose, onConfirm, title, msg }) => {
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl">
+                        <h3 className="text-lg font-bold text-white mb-2">{title}</h3>
+                        <p className="text-sm text-zinc-400 mb-6">{msg}</p>
+                        <div className="flex justify-end gap-3">
+                            <button onClick={onClose} className="px-4 py-2 text-xs font-bold text-zinc-400 hover:text-white transition-colors">CANCEL</button>
+                            <button onClick={() => { onConfirm(); onClose(); }} className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg text-xs font-bold transition-colors">CONFIRM</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const FileDropzone = ({ onFile, accept, disabled, label, file }) => {
+            const [isDragging, setIsDragging] = useState(false);
+            const inputRef = useRef(null);
+
+            const handleDrop = (e) => {
+                e.preventDefault(); setIsDragging(false);
+                if (disabled) return;
+                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    onFile(e.dataTransfer.files[0]);
+                }
+            };
+            
+            return (
+                <div 
+                    onDragOver={(e) => { e.preventDefault(); if(!disabled) setIsDragging(true); }}
+                    onDragLeave={() => setIsDragging(false)}
+                    onDrop={handleDrop}
+                    onClick={() => !disabled && inputRef.current.click()}
+                    className={`border-2 border-dashed rounded-xl p-6 text-center transition-all ${disabled ? 'opacity-50 cursor-not-allowed border-zinc-800 bg-zinc-950/50' : isDragging ? 'border-cyan-500 bg-cyan-500/10 cursor-copy' : 'border-zinc-800 hover:border-zinc-600 bg-zinc-900/30 hover:bg-zinc-900/50 cursor-pointer'}`}
+                >
+                    <input type="file" ref={inputRef} onChange={(e) => e.target.files[0] && onFile(e.target.files[0])} accept={accept} className="hidden" disabled={disabled} />
+                    {file ? (
+                        <div className="flex flex-col items-center text-cyan-400">
+                            <FileText className="w-8 h-8 mb-2" />
+                            <span className="text-xs font-bold break-all">{file.name}</span>
+                            <span className="text-[10px] text-zinc-500 mt-1">{(file.size / 1024).toFixed(2)} KB</span>
+                        </div>
+                    ) : (
+                        <div className="flex flex-col items-center text-zinc-500">
+                            <Upload className="w-8 h-8 mb-2" />
+                            <span className="text-xs font-bold uppercase tracking-widest">{label}</span>
+                            <span className="text-[10px] mt-1">Drag & drop or click to browse</span>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const ProgressModal = ({ isVisible, progress, isEncrypt, sizeBytes }) => {
+            if (!isVisible) return null;
+            const targetSeconds = isEncrypt ? Math.floor(sizeBytes * 0.4 / 1024) : Math.floor(sizeBytes * 0.05 / 1024);
+            const targetStr = targetSeconds < 1 ? "< 1s" : `${targetSeconds}s`;
+            
+            return (
+                <div className="fixed inset-0 bg-black/90 z-50 flex flex-col items-center justify-center p-4 backdrop-blur-sm">
+                    <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-8 shadow-2xl">
+                        <div className="flex justify-between items-end mb-4">
+                            <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-2">
+                                <RefreshCw className="w-4 h-4 text-cyan-500 animate-spin" />
+                                {isEncrypt ? 'Encrypting Struct' : 'Decrypting Struct'}
+                            </h3>
+                            <span className="text-cyan-400 font-mono font-bold">{Math.floor(progress * 100)}%</span>
+                        </div>
+                        <div className="h-2 w-full bg-zinc-950 rounded-full overflow-hidden border border-zinc-800">
+                            <div className="h-full bg-cyan-500 transition-all duration-200 shadow-[0_0_10px_rgba(6,182,212,0.5)]" style={{ width: `${progress * 100}%` }} />
+                        </div>
+                        <div className="flex justify-between mt-4 text-[10px] font-mono text-zinc-500 uppercase">
+                            <span>Est: {targetStr}</span>
+                            <span>Processing...</span>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        /**
+         * MAIN APPLICATION
+         */
+        const App = () => {
+            const [activeTab, setActiveTab] = useState('encrypt'); // 'encrypt' | 'decrypt' | 'generate'
+            const [resetModal, setResetModal] = useState({ open: false, onConfirm: null });
+            
+            // Progress State
+            const [isProcessing, setIsProcessing] = useState(false);
+            const [uiProgress, setUiProgress] = useState(0);
+            const [processingType, setProcessingType] = useState('encrypt');
+            const [processingSize, setProcessingSize] = useState(0);
+            const uiProgressRef = useRef(0);
+            const animFrameRef = useRef(null);
+
+            // --- TAB: GENERATE KEY ---
+            const [genUsePhrase, setGenUsePhrase] = useState(false);
+            const [genPhrase, setGenPhrase] = useState('');
+            const [genResult, setGenResult] = useState('');
+            const [genCopied, setGenCopied] = useState(false);
+
+            const handleGenerateKey = () => {
+                if (genUsePhrase) {
+                    if (!genPhrase.trim()) return;
+                    setGenResult(generatePKey(genPhrase));
+                } else {
+                    setGenResult(generatePKey());
+                }
+            };
+            
+            const handleDownloadKeyFile = (hexStr, filename) => {
+                const content = `${KEY_HEADER}${hexStr}${KEY_FOOTER}`;
+                downloadBlob(content, filename, 'text/plain');
+            };
+
+            // --- TAB: ENCRYPT ---
+            const [encInputType, setEncInputType] = useState(null); // 'text' | 'file'
+            const [encText, setEncText] = useState('');
+            const [encFile, setEncFile] = useState(null);
+            
+            const [encKeyMode, setEncKeyMode] = useState('manual'); // 'manual' | 'phrase' | 'file'
+            const [encManualKey, setEncManualKey] = useState('');
+            const [encPhrase, setEncPhrase] = useState('');
+            const [encKeyFile, setEncKeyFile] = useState(null);
+            const [encKeyFileHex, setEncKeyFileHex] = useState('');
+            
+            const [encError, setEncError] = useState('');
+            const [encResult, setEncResult] = useState(null); // { c: string, keyUsed: string, origName: string, isFile: boolean }
+            const [encShowPreview, setEncShowPreview] = useState(false);
+
+            const encDerivedKey = encKeyMode === 'phrase' && encPhrase ? generatePKey(encPhrase) : '';
+            const encActiveKey = encKeyMode === 'file' ? encKeyFileHex : (encKeyMode === 'phrase' ? encDerivedKey : encManualKey);
+
+            const handleEncryptKeyFile = async (file) => {
+                const text = await file.text();
+                const match = text.match(/-----BEGIN SHEP32 KEY-----\n([a-f0-9]{64})\n-----END SHEP32 KEY-----/i);
+                if (match) {
+                    setEncKeyFile(file);
+                    setEncKeyFileHex(match[1].toLowerCase());
+                    setEncKeyMode('file');
+                    setEncError('');
+                } else {
+                    setEncError('Invalid key file format.');
+                }
+            };
+
+            // --- TAB: DECRYPT ---
+            const [decInputType, setDecInputType] = useState(null); // 'text' | 'file'
+            const [decText, setDecText] = useState('');
+            const [decFile, setDecFile] = useState(null);
+            const [decFileData, setDecFileData] = useState(''); // String
+            
+            const [decKeyMode, setDecKeyMode] = useState('manual'); // 'manual' | 'phrase' | 'file'
+            const [decManualKey, setDecManualKey] = useState('');
+            const [decPhrase, setDecPhrase] = useState('');
+            const [decKeyFile, setDecKeyFile] = useState(null);
+            const [decKeyFileHex, setDecKeyFileHex] = useState('');
+
+            const [decError, setDecError] = useState('');
+            const [decResult, setDecResult] = useState(null); // { isFile: boolean, name: string, dataBytes: Uint8Array, text: string }
+            const [decOutputChoice, setDecOutputChoice] = useState('browser'); // 'browser' | 'file'
+
+            const decDerivedKey = decKeyMode === 'phrase' && decPhrase ? generatePKey(decPhrase) : '';
+            const decActiveKey = decKeyMode === 'file' ? decKeyFileHex : (decKeyMode === 'phrase' ? decDerivedKey : decManualKey);
+
+            const handleDecryptKeyFile = async (file) => {
+                const text = await file.text();
+                const match = text.match(/-----BEGIN SHEP32 KEY-----\n([a-f0-9]{64})\n-----END SHEP32 KEY-----/i);
+                if (match) {
+                    setDecKeyFile(file);
+                    setDecKeyFileHex(match[1].toLowerCase());
+                    setDecKeyMode('file');
+                    setDecError('');
+                } else {
+                    setDecError('Invalid key file format.');
+                }
+            };
+
+            const handleDecryptFileUpload = async (file) => {
+                // Read as text since encrypted payloads are Base62 strings
+                const text = await file.text();
+                setDecFileData(text.trim());
+                setDecFile(file);
+                setDecInputType('file');
+                setDecOutputChoice('file');
+                setDecText('');
+                setDecError('');
+            };
+
+            // --- PROGRESS ANIMATION LOGIC ---
+            const startProgressAnim = () => {
+                uiProgressRef.current = 0;
+                setUiProgress(0);
+                let lastTime = Date.now();
+                const animate = () => {
+                    const now = Date.now();
+                    const dt = now - lastTime;
+                    lastTime = now;
+                    let p = uiProgressRef.current;
+                    
+                    if (p < 0.20) p += 0.015 * (dt/16); // Fast ramp to 20%
+                    else if (p < 0.80) p += ((0.80 - p) * 0.01) * (dt/16); // Geometric slowdown
+                    else if (p < 0.99) p += 0.0005 * (dt/16); // Stall buffer
+                    
+                    uiProgressRef.current = p;
+                    setUiProgress(p);
+                    animFrameRef.current = requestAnimationFrame(animate);
+                };
+                animFrameRef.current = requestAnimationFrame(animate);
+            };
+
+            const stopProgressAnim = () => {
+                if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+                setUiProgress(1); // Snap to 100%
+            };
+
+            // --- ENCRYPTION EXECUTION ---
+            const executeEncrypt = () => {
+                setEncError('');
+                if (encInputType === 'file' && encFile.size > MAX_FILE_SIZE) {
+                    setEncError('File exceeds 100KB limit.'); return;
+                }
+                
+                let targetKey = encActiveKey;
+                let isAutoKey = false;
+                
+                if (!targetKey) {
+                    let rawData = encInputType === 'file' ? encFile.name + encFile.size : encText;
+                    targetKey = generatePKey(rawData || 'auto');
+                    isAutoKey = true;
+                } else if (!/^[0-9a-f]{64}$/i.test(targetKey)) {
+                    setEncError('Active key must be exactly 64 hex characters.'); return;
+                }
+
+                setProcessingType('encrypt');
+                setProcessingSize(encInputType === 'file' ? encFile.size : encText.length);
+                setIsProcessing(true);
+                startProgressAnim();
+
+                // Defer to let UI update and paint the modal
+                setTimeout(async () => {
+                    try {
+                        let payloadBytes;
+                        let origName = 'data';
+                        
+                        if (encInputType === 'file') {
+                            origName = encFile.name;
+                            const extIdx = origName.lastIndexOf('.');
+                            const name = extIdx > -1 ? origName.substring(0, extIdx) : origName;
+                            const ext = extIdx > -1 ? origName.substring(extIdx) : '';
+                            const sizeStr = encFile.size.toString();
+                            
+                            const headerStr = `${META_HEADER}${name}\n${ext}\n${sizeStr}${META_DELIM}`;
+                            const headerBytes = new TextEncoder().encode(headerStr);
+                            const fileBytes = new Uint8Array(await encFile.arrayBuffer());
+                            
+                            payloadBytes = new Uint8Array(headerBytes.length + fileBytes.length);
+                            payloadBytes.set(headerBytes, 0);
+                            payloadBytes.set(fileBytes, headerBytes.length);
+                        } else {
+                            payloadBytes = encText; // String directly handled by toBytesPython
+                        }
+
+                        const outResult = encryptData(payloadBytes, targetKey);
+                        
+                        stopProgressAnim();
+                        setTimeout(() => {
+                            setIsProcessing(false);
+                            setEncResult({ c: outResult.c, keyUsed: outResult.k, origName, isFile: encInputType === 'file', isAutoKey });
+                        }, 300);
+
+                    } catch (e) {
+                        stopProgressAnim();
+                        setIsProcessing(false);
+                        setEncError("Encryption failed: " + e.message);
+                    }
+                }, 100);
+            };
+
+            // --- DECRYPTION EXECUTION ---
+            const executeDecrypt = () => {
+                setDecError('');
+                if (!decActiveKey || !/^[0-9a-f]{64}$/i.test(decActiveKey)) {
+                    setDecError('Active key must be exactly 64 hex characters.'); return;
+                }
+
+                let payloadStr = decInputType === 'file' ? decFileData : decText.trim();
+                if (!payloadStr) {
+                    setDecError('No valid payload detected.'); return;
+                }
+
+                setProcessingType('decrypt');
+                setProcessingSize(payloadStr.length);
+                setIsProcessing(true);
+                startProgressAnim();
+
+                setTimeout(() => {
+                    try {
+                        const outBytes = decryptData(payloadStr, decActiveKey);
+                        
+                        // Parse metadata
+                        let isFileRestored = false;
+                        let restoredName = 'restored_data.bin';
+                        let pureData = outBytes;
+                        let textResult = '';
+
+                        try {
+                            const peekLen = Math.min(outBytes.length, 500);
+                            const peekStr = new TextDecoder('utf-8').decode(outBytes.slice(0, peekLen));
+                            if (peekStr.startsWith(META_HEADER)) {
+                                const lines = peekStr.split('\n');
+                                if (lines.length >= 5) {
+                                    const name = lines[1];
+                                    const ext = lines[2];
+                                    restoredName = name + ext;
+                                    const headerStr = lines.slice(0, 4).join('\n') + META_DELIM;
+                                    const headerBytesLen = new TextEncoder().encode(headerStr).length;
+                                    pureData = outBytes.slice(headerBytesLen);
+                                    isFileRestored = true;
+                                }
+                            }
+                        } catch(e) { }
+
+                        if (!isFileRestored && decOutputChoice === 'browser') {
+                            try {
+                                let chars = [];
+                                for (let i = 0; i < pureData.length; i += 2) {
+                                    let low = pureData[i];
+                                    let high = pureData[i+1] !== undefined ? pureData[i+1] : 0;
+                                    chars.push(String.fromCharCode((high << 8) | low));
+                                }
+                                textResult = chars.join('');
+                            } catch(e) {
+                                throw new Error('Failed to decode string.');
+                            }
+                        }
+
+                        stopProgressAnim();
+                        setTimeout(() => {
+                            setIsProcessing(false);
+                            setDecResult({ isFile: isFileRestored || decOutputChoice === 'file', name: restoredName, dataBytes: pureData, text: textResult });
+                        }, 300);
+
+                    } catch (e) {
+                        stopProgressAnim();
+                        setIsProcessing(false);
+                        setDecError("Decryption failed: Invalid key or corrupted data structure.");
+                    }
+                }, 100);
+            };
+
+            const copyToClipboard = (text) => {
+                const el = document.createElement('textarea');
+                el.value = text;
+                document.body.appendChild(el);
+                el.select();
+                document.execCommand('copy');
+                document.body.removeChild(el);
+            };
+
+            const resetAll = () => {
+                setEncInputType(null); setEncText(''); setEncFile(null); setEncKeyMode('manual'); setEncManualKey(''); setEncPhrase(''); setEncKeyFile(null); setEncKeyFileHex(''); setEncError(''); setEncResult(null);
+                setDecInputType(null); setDecText(''); setDecFile(null); setDecFileData(''); setDecKeyMode('manual'); setDecManualKey(''); setDecPhrase(''); setDecKeyFile(null); setDecKeyFileHex(''); setDecError(''); setDecResult(null);
+                setGenPhrase(''); setGenResult(''); setGenUsePhrase(false);
+            };
+
+            return (
+                <div className="min-h-screen flex flex-col items-center p-4 md:p-8 relative">
+                    <ProgressModal isVisible={isProcessing} progress={uiProgress} isEncrypt={processingType === 'encrypt'} sizeBytes={processingSize} />
+                    <ConfirmModal 
+                        isOpen={resetModal.open} 
+                        title="Reset Application" 
+                        msg="This will clear all inputs, keys, and results. This cannot be undone."
+                        onClose={() => setResetModal({ open: false, onConfirm: null })}
+                        onConfirm={() => { resetModal.onConfirm && resetModal.onConfirm(); }}
+                    />
+
+                    <div className="w-full max-w-4xl flex-grow flex flex-col">
+                        {/* Header */}
+                        <header className="mb-8 flex flex-col md:flex-row md:items-end gap-4 md:gap-6 border-b border-zinc-800 pb-8">
+                            <div className="p-4 bg-zinc-900 rounded-2xl border border-zinc-800 shadow-xl mx-auto md:mx-0">
+                                <Shield className="w-10 h-10 text-cyan-500" />
+                            </div>
+                            <div className="flex-grow text-center md:text-left">
+                                <h1 className="text-4xl md:text-5xl font-black text-white tracking-tighter">SHEP-32</h1>
+                                <p className="text-cyan-500 font-mono text-[10px] md:text-xs uppercase tracking-[0.2em] mt-2">
+                                    Series Hashing Encryption Protocol
+                                </p>
+                            </div>
+                            <div className="flex items-center gap-4 bg-zinc-900/40 p-2 rounded-lg border border-zinc-800/50 self-center md:self-end">
+                                <div className="text-right hidden sm:block">
+                                    <p className="text-[10px] text-zinc-500 font-mono leading-none">VERSION</p>
+                                    <p className="text-xs text-zinc-400 font-mono uppercase tracking-tighter">0.7.5-STANDALONE</p>
+                                </div>
+                                <div className="h-8 w-px bg-zinc-800 hidden sm:block" />
+                                <div className="flex flex-col items-center">
+                                    <div className="w-2 h-2 rounded-full bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.8)]" />
+                                    <span className="text-[10px] text-zinc-400 mt-1 font-mono uppercase tracking-tighter">Online</span>
+                                </div>
+                            </div>
+                        </header>
+
+                        {/* Navigation */}
+                        <nav className="flex bg-zinc-900 p-1 rounded-xl border border-zinc-800 mb-8 self-start w-full md:w-auto overflow-x-auto">
+                            {['encrypt', 'decrypt', 'generate'].map((tab) => (
+                                <button 
+                                    key={tab}
+                                    onClick={() => setActiveTab(tab)}
+                                    className={`flex-1 md:flex-none px-6 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 uppercase tracking-wider whitespace-nowrap ${activeTab === tab ? 'bg-cyan-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}
+                                >
+                                    {tab === 'encrypt' ? <Lock className="w-4 h-4"/> : tab === 'decrypt' ? <Unlock className="w-4 h-4"/> : <KeyIcon className="w-4 h-4"/>}
+                                    {tab === 'generate' ? 'Generate Key' : tab}
+                                </button>
+                            ))}
+                        </nav>
+
+                        {/* Main Content Area */}
+                        <main className="flex-grow flex flex-col">
+                            
+                            {/* --- ENCRYPT TAB --- */}
+                            {activeTab === 'encrypt' && (
+                                <div className="animate-in fade-in duration-300">
+                                    {!encResult ? (
+                                        <div className="space-y-6">
+                                            {/* Input Section */}
+                                            <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6">
+                                                <h2 className="text-sm font-bold text-white uppercase tracking-widest mb-4 flex items-center">
+                                                    1. Input Data
+                                                    <InfoTooltip text="Provide text or drop a file. Files are strictly capped at 100KB. Files are prepended with structure metadata." />
+                                                </h2>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                                    <div className="flex flex-col">
+                                                        <textarea 
+                                                            className={`w-full h-32 bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-sm font-mono text-cyan-100/80 outline-none transition-all resize-none ${encInputType === 'file' ? 'opacity-30 cursor-not-allowed' : 'focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500'}`}
+                                                            placeholder="Paste plain text here..."
+                                                            value={encText}
+                                                            disabled={encInputType === 'file'}
+                                                            onChange={(e) => {
+                                                                setEncText(e.target.value);
+                                                                if(e.target.value) setEncInputType('text');
+                                                                else if(!encFile) setEncInputType(null);
+                                                            }}
+                                                        />
+                                                        {encInputType === 'text' && <span className="text-[10px] text-cyan-500 font-mono mt-2 text-right">Text mode active • {encText.length} chars</span>}
+                                                    </div>
+                                                    <div className="flex flex-col justify-center">
+                                                        <FileDropzone 
+                                                            label="Upload File for Encryption" 
+                                                            accept="*" 
+                                                            disabled={encInputType === 'text'} 
+                                                            file={encFile}
+                                                            onFile={(f) => {
+                                                                if(f.size > MAX_FILE_SIZE) { setEncError('File exceeds 100KB limit.'); return; }
+                                                                setEncFile(f); setEncInputType('file'); setEncError('');
+                                                            }}
+                                                        />
+                                                        {encInputType === 'file' && (
+                                                            <button onClick={() => { setEncFile(null); setEncInputType(null); }} className="text-[10px] text-red-400 hover:text-red-300 font-bold mt-2 uppercase tracking-wider text-center">
+                                                                Remove File
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Key Section */}
+                                            <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6">
+                                                <div className="flex justify-between items-center mb-4">
+                                                    <h2 className="text-sm font-bold text-white uppercase tracking-widest flex items-center">
+                                                        2. Cryptographic Key
+                                                        <InfoTooltip text="Provide a 64-hex key, upload a .pkey file, or derive one from a keyphrase. If left empty, a key will be auto-generated." />
+                                                    </h2>
+                                                    {encKeyMode === 'file' && (
+                                                        <span className="text-[10px] px-2 py-1 bg-cyan-900/30 text-cyan-400 rounded border border-cyan-800 uppercase font-bold tracking-widest">File Key Active</span>
+                                                    )}
+                                                </div>
+
+                                                <div className="flex flex-col md:flex-row gap-6 items-start">
+                                                    <div className="flex-grow w-full space-y-3">
+                                                        <div className="flex items-center gap-2">
+                                                            <input 
+                                                                type="checkbox" 
+                                                                id="encUsePhrase" 
+                                                                checked={encKeyMode === 'phrase'} 
+                                                                disabled={encKeyMode === 'file'}
+                                                                onChange={(e) => {
+                                                                    setEncKeyMode(e.target.checked ? 'phrase' : 'manual');
+                                                                    setEncError('');
+                                                                }} 
+                                                                className="accent-cyan-500 w-4 h-4 rounded border-zinc-800 bg-zinc-950"
+                                                            />
+                                                            <label htmlFor="encUsePhrase" className={`text-xs font-bold ${encKeyMode==='file' ? 'text-zinc-600' : 'text-zinc-400'}`}>Use keyphrase (derives key via generatePKey)</label>
+                                                        </div>
+                                                        {encKeyMode === 'phrase' ? (
+                                                            <div className="space-y-2">
+                                                                <input 
+                                                                    type="text" 
+                                                                    placeholder="Enter secret keyphrase..." 
+                                                                    value={encPhrase}
+                                                                    onChange={(e) => setEncPhrase(e.target.value)}
+                                                                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-sm text-white focus:border-cyan-500 outline-none"
+                                                                />
+                                                                <p className="text-[10px] text-amber-500 flex items-center gap-1"><Info className="w-3 h-3"/> Keyphrases are inherently less secure than generated keys.</p>
+                                                                {encDerivedKey && (
+                                                                    <div className="mt-3 p-3 bg-zinc-950 rounded-lg border border-zinc-800">
+                                                                        <span className="text-[10px] text-zinc-500 uppercase block mb-1">Derived 64-Hex Key</span>
+                                                                        <span className="text-xs font-mono text-cyan-400 break-all">{encDerivedKey}</span>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        ) : (
+                                                            <input 
+                                                                type="text" 
+                                                                placeholder="Enter 64-character hex key (Optional)" 
+                                                                value={encManualKey}
+                                                                disabled={encKeyMode === 'file'}
+                                                                onChange={(e) => setEncManualKey(e.target.value.toLowerCase().replace(/[^0-9a-f]/g, ''))}
+                                                                maxLength={64}
+                                                                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-sm font-mono text-cyan-400 focus:border-cyan-500 outline-none disabled:opacity-30 disabled:cursor-not-allowed"
+                                                            />
+                                                        )}
+                                                    </div>
+                                                    
+                                                    <div className="shrink-0 w-full md:w-auto md:min-w-[200px]">
+                                                        <FileDropzone 
+                                                            label="Upload .pkey File" 
+                                                            accept=".pkey" 
+                                                            disabled={false} 
+                                                            file={encKeyFile}
+                                                            onFile={handleEncryptKeyFile}
+                                                        />
+                                                        {encKeyMode === 'file' && (
+                                                            <button onClick={() => { setEncKeyFile(null); setEncKeyFileHex(''); setEncKeyMode('manual'); }} className="text-[10px] text-zinc-400 hover:text-white font-bold mt-2 uppercase tracking-wider text-center w-full">
+                                                                Clear File Key
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Action Section */}
+                                            <div className="flex flex-col items-center gap-4">
+                                                {encError && <div className="text-xs font-bold text-red-400 bg-red-950/30 border border-red-900/50 px-4 py-2 rounded-lg w-full text-center">{encError}</div>}
+                                                <button 
+                                                    onClick={executeEncrypt}
+                                                    disabled={!encInputType}
+                                                    className="w-full md:w-auto px-12 py-4 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold text-sm uppercase tracking-widest shadow-[0_0_20px_rgba(6,182,212,0.15)] disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none transition-all flex items-center justify-center gap-2"
+                                                >
+                                                    <Lock className="w-5 h-5" /> Execute Encryption
+                                                </button>
+                                                <button onClick={() => setResetModal({ open: true, onConfirm: resetAll })} className="text-xs text-zinc-500 hover:text-zinc-300 font-bold uppercase tracking-wider">Reset Form</button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        /* Encrypt Result State */
+                                        <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6 md:p-10 text-center animate-in zoom-in-95 duration-500 shadow-2xl relative overflow-hidden">
+                                            <div className="absolute top-0 right-0 p-4 opacity-5">
+                                                <Shield className="w-48 h-48 -mr-12 -mt-12" />
+                                            </div>
+                                            <div className="w-16 h-16 bg-cyan-500/20 border border-cyan-500/50 rounded-full flex items-center justify-center mx-auto mb-6">
+                                                <Check className="w-8 h-8 text-cyan-400" />
+                                            </div>
+                                            <h2 className="text-2xl font-black text-white mb-2 tracking-tight">Encryption Complete</h2>
+                                            <p className="text-zinc-400 text-sm mb-8 font-mono bg-zinc-950 inline-block px-4 py-1.5 rounded-md border border-zinc-800">
+                                                Target: {encResult.isFile ? encResult.origName : 'Plaintext Stream'}
+                                            </p>
+
+                                            {encResult.isAutoKey && (
+                                                <div className="mb-8 p-4 bg-amber-950/20 border border-amber-900/50 rounded-xl text-amber-400 text-xs text-left">
+                                                    <strong>Important:</strong> An auto-generated key was used. You must save this key to decrypt your data later. Loss of this key means permanent data loss.
+                                                </div>
+                                            )}
+
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto mb-8">
+                                                <button 
+                                                    onClick={() => {
+                                                        const ext = encResult.isFile ? (DOC_EXTS.includes(encResult.origName.substring(encResult.origName.lastIndexOf('.')).toLowerCase()) ? '.sh3' : '.shep32') : '.shep32';
+                                                        const name = encResult.isFile ? encResult.origName.substring(0, encResult.origName.lastIndexOf('.')) || encResult.origName : 'encrypted_text';
+                                                        downloadBlob(encResult.c, `${name}${ext}`, 'text/plain');
+                                                    }}
+                                                    className="p-4 bg-zinc-800 hover:bg-zinc-700 rounded-xl border border-zinc-700 text-sm font-bold text-white flex flex-col items-center justify-center gap-2 transition-colors"
+                                                >
+                                                    <Download className="w-5 h-5" /> Download Encrypted Data
+                                                </button>
+                                                <button 
+                                                    onClick={() => handleDownloadKeyFile(encResult.keyUsed, 'encryption_key.pkey')}
+                                                    className="p-4 bg-cyan-900/30 hover:bg-cyan-900/50 rounded-xl border border-cyan-800 text-sm font-bold text-cyan-400 flex flex-col items-center justify-center gap-2 transition-colors"
+                                                >
+                                                    <KeyIcon className="w-5 h-5" /> Download Key File (.pkey)
+                                                </button>
+                                                <button 
+                                                    onClick={() => { copyToClipboard(encResult.keyUsed); setGenCopied(true); setTimeout(()=>setGenCopied(false), 2000); }}
+                                                    className="p-4 bg-zinc-800 hover:bg-zinc-700 rounded-xl border border-zinc-700 text-sm font-bold text-white flex flex-col items-center justify-center gap-2 transition-colors"
+                                                >
+                                                    {genCopied ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />} Copy Key to Clipboard
+                                                </button>
+                                                <button 
+                                                    onClick={resetAll}
+                                                    className="p-4 bg-zinc-900 hover:bg-zinc-800 rounded-xl border border-zinc-800 text-sm font-bold text-zinc-400 flex flex-col items-center justify-center gap-2 transition-colors"
+                                                >
+                                                    <RefreshCw className="w-5 h-5" /> Encrypt Another
+                                                </button>
+                                            </div>
+
+                                            {!encResult.isFile && (
+                                                <div className="max-w-2xl mx-auto text-left">
+                                                    <button onClick={() => setEncShowPreview(!encShowPreview)} className="text-xs font-bold text-cyan-500 hover:text-cyan-400 flex items-center gap-2 mb-2 uppercase tracking-wider">
+                                                        {encShowPreview ? <EyeOff className="w-4 h-4"/> : <Eye className="w-4 h-4"/>} 
+                                                        {encShowPreview ? 'Hide Preview' : 'Preview Encrypted Data (Base62)'}
+                                                    </button>
+                                                    {encShowPreview && (
+                                                        <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 font-mono text-zinc-500 text-xs break-all max-h-64 overflow-y-auto shadow-inner relative">
+                                                            {encResult.c.slice(0, 1000)}
+                                                            {encResult.c.length > 1000 && <span className="text-zinc-600 block mt-2 italic">... (truncated for preview)</span>}
+                                                            <button onClick={() => copyToClipboard(encResult.c)} className="absolute top-2 right-2 p-1.5 bg-zinc-800 rounded text-zinc-400 hover:text-white"><Copy className="w-3.5 h-3.5"/></button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* --- DECRYPT TAB --- */}
+                            {activeTab === 'decrypt' && (
+                                <div className="animate-in fade-in duration-300">
+                                    {!decResult ? (
+                                        <div className="space-y-6">
+                                            {/* Input Section */}
+                                            <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6">
+                                                <h2 className="text-sm font-bold text-white uppercase tracking-widest mb-4 flex items-center">
+                                                    1. Encrypted Data
+                                                    <InfoTooltip text="Paste Base62 ciphertext or upload an encrypted file (.shep32 / .sh3). Both modes are supported." />
+                                                </h2>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                                    <div className="flex flex-col">
+                                                        <textarea 
+                                                            className={`w-full h-32 bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-sm font-mono text-cyan-100/80 outline-none transition-all resize-none ${decInputType === 'file' ? 'opacity-30 cursor-not-allowed' : 'focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500'}`}
+                                                            placeholder="Paste Base62 ciphertext here..."
+                                                            value={decText}
+                                                            disabled={decInputType === 'file'}
+                                                            onChange={(e) => {
+                                                                setDecText(e.target.value);
+                                                                if(e.target.value) { setDecInputType('text'); setDecOutputChoice('browser'); }
+                                                                else if(!decFile) setDecInputType(null);
+                                                            }}
+                                                        />
+                                                        {decInputType === 'text' && <span className="text-[10px] text-cyan-500 font-mono mt-2 text-right">Text mode active</span>}
+                                                    </div>
+                                                    <div className="flex flex-col justify-center">
+                                                        <FileDropzone 
+                                                            label="Upload Encrypted File" 
+                                                            accept=".shep32,.sh3,*" 
+                                                            disabled={decInputType === 'text'} 
+                                                            file={decFile}
+                                                            onFile={handleDecryptFileUpload}
+                                                        />
+                                                        {decInputType === 'file' && (
+                                                            <button onClick={() => { setDecFile(null); setDecFileData(''); setDecInputType(null); }} className="text-[10px] text-red-400 hover:text-red-300 font-bold mt-2 uppercase tracking-wider text-center">
+                                                                Remove File
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Key Section */}
+                                            <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6">
+                                                <div className="flex justify-between items-center mb-4">
+                                                    <h2 className="text-sm font-bold text-white uppercase tracking-widest flex items-center">
+                                                        2. Decryption Key
+                                                    </h2>
+                                                    {decKeyMode === 'file' && (
+                                                        <span className="text-[10px] px-2 py-1 bg-cyan-900/30 text-cyan-400 rounded border border-cyan-800 uppercase font-bold tracking-widest">File Key Active</span>
+                                                    )}
+                                                </div>
+
+                                                <div className="flex flex-col md:flex-row gap-6 items-start">
+                                                    <div className="flex-grow w-full space-y-3">
+                                                        <div className="flex items-center gap-2">
+                                                            <input 
+                                                                type="checkbox" 
+                                                                id="decUsePhrase" 
+                                                                checked={decKeyMode === 'phrase'} 
+                                                                disabled={decKeyMode === 'file'}
+                                                                onChange={(e) => {
+                                                                    setDecKeyMode(e.target.checked ? 'phrase' : 'manual');
+                                                                    setDecError('');
+                                                                }} 
+                                                                className="accent-cyan-500 w-4 h-4 rounded border-zinc-800 bg-zinc-950"
+                                                            />
+                                                            <label htmlFor="decUsePhrase" className={`text-xs font-bold ${decKeyMode==='file' ? 'text-zinc-600' : 'text-zinc-400'}`}>Use keyphrase (derives key via generatePKey)</label>
+                                                        </div>
+                                                        {decKeyMode === 'phrase' ? (
+                                                            <div className="space-y-2">
+                                                                <input 
+                                                                    type="text" 
+                                                                    placeholder="Enter secret keyphrase..." 
+                                                                    value={decPhrase}
+                                                                    onChange={(e) => setDecPhrase(e.target.value)}
+                                                                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-sm text-white focus:border-cyan-500 outline-none"
+                                                                />
+                                                                {decDerivedKey && (
+                                                                    <div className="mt-3 p-3 bg-zinc-950 rounded-lg border border-zinc-800">
+                                                                        <span className="text-[10px] text-zinc-500 uppercase block mb-1">Derived 64-Hex Key</span>
+                                                                        <span className="text-xs font-mono text-cyan-400 break-all">{decDerivedKey}</span>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        ) : (
+                                                            <input 
+                                                                type="text" 
+                                                                placeholder="Enter exactly 64-character hex key" 
+                                                                value={decManualKey}
+                                                                disabled={decKeyMode === 'file'}
+                                                                onChange={(e) => setDecManualKey(e.target.value.toLowerCase().replace(/[^0-9a-f]/g, ''))}
+                                                                maxLength={64}
+                                                                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-sm font-mono text-cyan-400 focus:border-cyan-500 outline-none disabled:opacity-30 disabled:cursor-not-allowed"
+                                                            />
+                                                        )}
+                                                    </div>
+                                                    
+                                                    <div className="shrink-0 w-full md:w-auto md:min-w-[200px]">
+                                                        <FileDropzone 
+                                                            label="Upload .pkey File" 
+                                                            accept=".pkey" 
+                                                            disabled={false} 
+                                                            file={decKeyFile}
+                                                            onFile={handleDecryptKeyFile}
+                                                        />
+                                                        {decKeyMode === 'file' && (
+                                                            <button onClick={() => { setDecKeyFile(null); setDecKeyFileHex(''); setDecKeyMode('manual'); }} className="text-[10px] text-zinc-400 hover:text-white font-bold mt-2 uppercase tracking-wider text-center w-full">
+                                                                Clear File Key
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Action Section */}
+                                            <div className="flex flex-col items-center gap-4">
+                                                {decInputType && (
+                                                    <div className="flex items-center gap-4 bg-zinc-950 border border-zinc-800 p-2 rounded-lg">
+                                                        <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest pl-2">Output:</span>
+                                                        <select value={decOutputChoice} onChange={(e) => setDecOutputChoice(e.target.value)} className="bg-zinc-900 border border-zinc-800 rounded-md px-3 py-1.5 text-xs font-bold text-cyan-400 outline-none cursor-pointer">
+                                                            <option value="browser">Browser Text</option>
+                                                            <option value="file">File Download</option>
+                                                        </select>
+                                                    </div>
+                                                )}
+                                                {decError && <div className="text-xs font-bold text-red-400 bg-red-950/30 border border-red-900/50 px-4 py-2 rounded-lg w-full text-center">{decError}</div>}
+                                                <button 
+                                                    onClick={executeDecrypt}
+                                                    disabled={!decInputType || !decActiveKey}
+                                                    className="w-full md:w-auto px-12 py-4 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold text-sm uppercase tracking-widest shadow-[0_0_20px_rgba(6,182,212,0.15)] disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none transition-all flex items-center justify-center gap-2"
+                                                >
+                                                    <Unlock className="w-5 h-5" /> Execute Decryption
+                                                </button>
+                                                <button onClick={() => setResetModal({ open: true, onConfirm: resetAll })} className="text-xs text-zinc-500 hover:text-zinc-300 font-bold uppercase tracking-wider">Reset Form</button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        /* Decrypt Result State */
+                                        <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6 md:p-10 text-center animate-in zoom-in-95 duration-500 shadow-2xl relative overflow-hidden">
+                                            <div className="absolute top-0 left-0 p-4 opacity-5">
+                                                <Unlock className="w-48 h-48 -ml-12 -mt-12" />
+                                            </div>
+                                            <div className="w-16 h-16 bg-cyan-500/20 border border-cyan-500/50 rounded-full flex items-center justify-center mx-auto mb-6">
+                                                <Check className="w-8 h-8 text-cyan-400" />
+                                            </div>
+                                            <h2 className="text-2xl font-black text-white mb-2 tracking-tight">Decryption Complete</h2>
+                                            
+                                            {decResult.isFile ? (
+                                                <p className="text-zinc-400 text-sm mb-8 font-mono bg-zinc-950 inline-block px-4 py-1.5 rounded-md border border-zinc-800">
+                                                    Restored: {decResult.name}
+                                                </p>
+                                            ) : (
+                                                <p className="text-zinc-400 text-sm mb-8 font-mono bg-zinc-950 inline-block px-4 py-1.5 rounded-md border border-zinc-800">
+                                                    Extracted Plaintext
+                                                </p>
+                                            )}
+
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto mb-8">
+                                                {decResult.isFile ? (
+                                                    <button 
+                                                        onClick={() => downloadBlob(decResult.dataBytes, decResult.name)}
+                                                        className="p-4 bg-cyan-900/30 hover:bg-cyan-900/50 rounded-xl border border-cyan-800 text-sm font-bold text-cyan-400 flex flex-col items-center justify-center gap-2 transition-colors"
+                                                    >
+                                                        <Download className="w-5 h-5" /> Download Restored File
+                                                    </button>
+                                                ) : (
+                                                    <button 
+                                                        onClick={() => { copyToClipboard(decResult.text); setGenCopied(true); setTimeout(()=>setGenCopied(false), 2000); }}
+                                                        className="p-4 bg-cyan-900/30 hover:bg-cyan-900/50 rounded-xl border border-cyan-800 text-sm font-bold text-cyan-400 flex flex-col items-center justify-center gap-2 transition-colors"
+                                                    >
+                                                        {genCopied ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />} Copy Plaintext
+                                                    </button>
+                                                )}
+                                                <button 
+                                                    onClick={resetAll}
+                                                    className="p-4 bg-zinc-800 hover:bg-zinc-700 rounded-xl border border-zinc-700 text-sm font-bold text-white flex flex-col items-center justify-center gap-2 transition-colors"
+                                                >
+                                                    <RefreshCw className="w-5 h-5" /> Decrypt Another
+                                                </button>
+                                            </div>
+
+                                            {!decResult.isFile && (
+                                                <div className="max-w-3xl mx-auto text-left">
+                                                    <div className="bg-zinc-950 p-6 rounded-xl border border-zinc-800 text-zinc-300 text-sm break-words whitespace-pre-wrap max-h-96 overflow-y-auto shadow-inner relative font-sans leading-relaxed">
+                                                        {decResult.text}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* --- GENERATE KEY TAB --- */}
+                            {activeTab === 'generate' && (
+                                <div className="animate-in fade-in duration-300 max-w-3xl mx-auto w-full space-y-6">
+                                    <div className="bg-amber-950/20 border border-amber-900/50 rounded-2xl p-4 flex items-start gap-4 text-amber-500">
+                                        <Info className="w-5 h-5 shrink-0 mt-0.5" />
+                                        <div className="text-xs">
+                                            <strong className="block mb-1 text-amber-400 text-sm uppercase tracking-widest">Crucial Warning</strong>
+                                            Save your generated keys securely. Cryptographic keys created here are not stored or logged anywhere. <strong>If you lose your key after encrypting data, recovery is mathematically impossible.</strong>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6 md:p-8 shadow-xl">
+                                        <div className="flex items-center gap-3 mb-6">
+                                            <input 
+                                                type="checkbox" 
+                                                id="genUsePhrase" 
+                                                checked={genUsePhrase} 
+                                                onChange={(e) => {
+                                                    setGenUsePhrase(e.target.checked);
+                                                    setGenResult('');
+                                                }} 
+                                                className="accent-cyan-500 w-4 h-4 rounded border-zinc-800 bg-zinc-950"
+                                            />
+                                            <label htmlFor="genUsePhrase" className="text-sm font-bold text-zinc-300">Use keyphrase to generate key (generatePKey(n))</label>
+                                        </div>
+
+                                        {genUsePhrase && (
+                                            <input 
+                                                type="text" 
+                                                placeholder="Enter secret keyphrase here..." 
+                                                value={genPhrase}
+                                                onChange={(e) => setGenPhrase(e.target.value)}
+                                                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-sm text-white focus:border-cyan-500 outline-none mb-6"
+                                            />
+                                        )}
+
+                                        <div className="flex gap-4">
+                                            <button 
+                                                onClick={handleGenerateKey}
+                                                disabled={genUsePhrase && !genPhrase.trim()}
+                                                className="flex-grow px-6 py-4 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold text-sm uppercase tracking-widest shadow-lg disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+                                            >
+                                                <KeyIcon className="w-5 h-5" /> Generate 64-Hex Key
+                                            </button>
+                                        </div>
+
+                                        {genResult && (
+                                            <div className="mt-8 animate-in slide-in-from-bottom-4 duration-500">
+                                                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest block mb-2">
+                                                    {genUsePhrase ? 'Key derived from keyphrase' : 'Randomly Generated Key'}
+                                                </label>
+                                                <div className="bg-zinc-950 p-6 rounded-xl border border-zinc-800 flex flex-col md:flex-row items-center gap-4 shadow-inner">
+                                                    <span className="font-mono text-cyan-400 text-base md:text-lg break-all text-center md:text-left flex-grow">{genResult}</span>
+                                                    <div className="flex gap-2 shrink-0">
+                                                        <button 
+                                                            onClick={() => { copyToClipboard(genResult); setGenCopied(true); setTimeout(()=>setGenCopied(false), 2000); }}
+                                                            className="p-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg transition-colors tooltip-trigger"
+                                                            title="Copy to clipboard"
+                                                        >
+                                                            {genCopied ? <Check className="w-5 h-5 text-green-400" /> : <Copy className="w-5 h-5" />}
+                                                        </button>
+                                                        <button 
+                                                            onClick={() => handleDownloadKeyFile(genResult, 'shep32_key.pkey')}
+                                                            className="p-2 bg-cyan-900/30 border border-cyan-800 hover:bg-cyan-900/50 text-cyan-400 rounded-lg transition-colors"
+                                                            title="Save as .pkey"
+                                                        >
+                                                            <Download className="w-5 h-5" />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <div className="mt-6 flex justify-center">
+                                                    <button onClick={resetAll} className="text-xs text-zinc-500 hover:text-zinc-300 font-bold uppercase tracking-wider flex items-center gap-1">
+                                                        <X className="w-3.5 h-3.5" /> Clear Outputs
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="text-center mt-6">
+                                        <a href="https://andylehti.github.io/shep32key/" target="_blank" rel="noopener noreferrer" className="text-xs font-mono text-cyan-700 hover:text-cyan-400 uppercase tracking-widest border-b border-transparent hover:border-cyan-400 pb-0.5 transition-colors">
+                                            Benchmark Hashes →
+                                        </a>
+                                    </div>
+                                </div>
+                            )}
+
+                        </main>
+                    </div>
+
+                    {/* Responsive Footer */}
+                    <footer className="w-full max-w-6xl mt-16 border-t border-zinc-900 pt-8 flex flex-col items-center justify-center gap-6 text-zinc-600 pb-4">
+                        <div className="text-center">
+                            <p className="text-[10px] font-mono">
+                                <span className="text-zinc-500 font-bold uppercase tracking-widest">andrew lehti</span> &copy; 2024-{new Date().getFullYear()}
+                            </p>
+                            <a href="http://metopedia.com" target="_blank" rel="noopener noreferrer" className="text-[9px] font-mono text-cyan-900 hover:text-cyan-700 uppercase tracking-tighter">
+                                metopedia.com
+                            </a>
+                        </div>
+                        
+                        <div className="flex flex-wrap justify-center items-center gap-3 md:gap-4 text-[9px] font-mono tracking-tighter uppercase px-4">
+                            <a href="https://figshare.com/authors/Andrew_Lehti/19424050" target="_blank" rel="noopener noreferrer" className="hover:text-cyan-500 transition-colors">Figshare</a>
+                            <span className="text-zinc-800">|</span>
+                            <a href="https://cmu.academia.edu/AndrewLehti" target="_blank" rel="noopener noreferrer" className="hover:text-cyan-500 transition-colors">Academia</a>
+                            <span className="text-zinc-800">|</span>
+                            <a href="https://orcid.org/0000-0002-0051-5851" target="_blank" rel="noopener noreferrer" className="hover:text-cyan-500 transition-colors">ORCID</a>
+                            <span className="text-zinc-800">|</span>
+                            <a href="https://github.com/andylehti/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 hover:text-cyan-500 transition-colors">
+                                <Github className="w-3 h-3" /> GitHub
+                            </a>
+                        </div>
+                    </footer>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
