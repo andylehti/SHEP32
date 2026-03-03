@@ -1,4 +1,5 @@
 #24A
+import streamlit as st
 import math, os, sys, time, string, hashlib, base64
 from random import seed, randint, choice
 from collections import Counter
@@ -73,6 +74,45 @@ def anyBase(n, b):
 
 def hashKey(n): return getB(fetchKey(n))
 def fetchKey(n): return manipulateKey(tDecimal(manipulateData(getKey(checkData(n+90, (n % 7) + 1), 79), n), 10))
+def manipulateKey(n): return fDecimal(tDecimal(hex(n)[2:], 16) + int(fDecimal(n, 16), 16), 16)[-63:-1]
+def getKey(n, x=78): return next(str(n) for _ in iter(int, 1) if len(str(n := (n // 8) + int(Ep(str(n // 5), len(str(n)))))) <= x)
+
+def fromAnyBase(n, b):
+    res = 0
+    for p in n.split(): res = res * b + int(p)
+    return res
+
+def generateSeries(s, n): seed(s); return ''.join(str(randint(0, 8)) for _ in range(n))
+def manipulateData(s, c): k = generateSeries(c, len(str(s))); return ''.join(str((int(str(s)[i]) + int(k[i])) % 10) for i in range(len(str(s))))
+def inverseData(s, c): k = generateSeries(c, len(str(s))); return ''.join(str((int(str(s)[i]) - int(k[i])) % 10) for i in range(len(str(s))))
+def qRotate(s): return s[5:] + s[2:5][::-1] + s[:2]
+def pRotate(s): return s[-2:] + s[-5:-2][::-1] + s[:-5]
+def interject(s): s, p = (s[:-1], s[-1]) if len(s) % 2 else (s, ''); h = len(s) // 2; return ''.join(x + y for x, y in zip(s[:h], s[h:])) + p
+def inverJect(s): s, p = (s[:-1], s[-1]) if len(s) % 2 else (s, ''); return ''.join(s[i] for i in range(0, len(s), 2)) + ''.join(s[i] for i in range(1, len(s), 2)) + p
+def keySplit(n, k, y=1): m = str(k) if y == 1 else str(k)[::-1]; return [n := bSplit(n, int(d) + 2) for d in m][-1]
+def bSplit(s, f=4): s = bin(s)[3:]; return int('1' + ''.join(s[i:i+f][::-1] for i in range(0, len(s) - len(s) % f, f)) + s[len(s) - len(s) % f:], 2)
+
+def kSplit(s, k):
+    s_bin = bin(s)[3:]
+    k_str = str(k).replace('0', '')
+    if not k_str: return int('1' + s_bin[::-1], 2)
+
+    k_digits = [int(d) + 1 for d in k_str]
+    k_len, s_len = len(k_digits), len(s_bin)
+    chunks, idx, k_idx = [], 0, 0
+
+    while idx < s_len:
+        step = k_digits[k_idx % k_len]
+        chunks.append(s_bin[idx : idx + step][::-1])
+        idx += step
+        k_idx += 1
+
+    return int('1' + ''.join(chunks), 2)
+
+def Ap(n, m, p): return str(int(n) * int(m))[:p]
+def Bp(n, p): return ''.join(str((int(n[i % len(n)]) + int(n[0])) % 10) for i in range(p))
+def Cp(n, m, p): return str(int(n) * int(n[:3 % len(n)]))[:p]
+def Dp(n, m, p): return (''.join(str(abs(int(n[i % len(n)]) * int(m[i % len(m)]))) for i in range(p)))[:p]
 def Ep(n, p): return str(sum(map(int, ' '.join(str(math.pi * (1/(int(n[i % len(n)]) + 1)/(int(n[(i+1) % len(n)]) + 1)) - int(math.pi * (1/(int(n[i % len(n)]) + 1)/(int(n[(i+1) % len(n)]) + 1))))[2:] for i in range(p)).split())))[-p:]
 
 def processKey(n, m=0):
@@ -174,5 +214,3 @@ n, k = encryptData(n)
 print(n, k)
 n = decryptData(n, k)
 print(n)
-
-def shepKeyFromString(s): return getB(fetchKey(toBytes(s)))[0].lower()
