@@ -1,12 +1,12 @@
-#24A
-import math, os, sys, time, string, hashlib, base64
+#29B
+import math, os, sys, time, string, hashlib, base64, re
 from random import seed, randint, choice
 from collections import Counter
 
 sys.set_int_max_str_digits(0)
 
 # =========================
-# SHEP32 CORE (key-only path uses hashKey)
+# SHEP32 CORE
 # =========================
 
 _GCHAR_BASE = ''.join([x for x in string.printable[:90] if x not in '/\\`"\',_!#$%&()* +-=']) + '&()*$%/\\`"\',_!#'
@@ -65,31 +65,169 @@ def fromBytes(n):
     if not b or b[0] != 1: raise ValueError("byte sentinel missing")
     return b[1:].decode("utf-16-le", errors="surrogatepass")
 
+def fast_anyBase_list(val, b):
+    if val == 0: return ['0']
+    
+    # Precise doubling search to find actual bounding target
+    powers = [(1, b)]
+    while powers[-1][1] <= val:
+        powers.append((powers[-1][0] * 2, powers[-1][1] ** 2))
+        
+    n = 0
+    cur_bn = 1
+    for p_n, p_val in reversed(powers):
+        if cur_bn * p_val <= val:
+            cur_bn *= p_val
+            n += p_n
+    n += 1
+
+    def _convert(v, target_len):
+        if target_len <= 500:
+            out = []
+            for _ in range(target_len):
+                out.append(str(v % b))
+                v //= b
+            return out[::-1]
+        
+        half = target_len // 2
+        divisor = b ** half
+        upper_val, lower_val = divmod(v, divisor)
+        return _convert(upper_val, target_len - half) + _convert(lower_val, half)
+
+    res = _convert(val, n)
+    while len(res) > 1 and res[0] == '0':
+        res.pop(0)
+    return res
+
 def anyBase(n, b):
-    if n == 0: return '0'
-    d = []
-    while n: d.append(str(n % b)); n //= b
-    return ' '.join(d[::-1])
+    return ' '.join(fast_anyBase_list(n, b))
+
+def fromAnyBase(n, b):
+    parts = n.split() if isinstance(n, str) else n
+    if not parts: return 0
+    ints = [int(p) for p in parts]
+    
+    def _eval(start, end):
+        if end - start <= 200:
+            res = 0
+            for i in range(start, end):
+                res = res * b + ints[i]
+            return res
+        mid = (start + end) // 2
+        return _eval(start, mid) * (b ** (end - mid)) + _eval(mid, end)
+        
+    return _eval(0, len(ints))
+
+def fast_base_convert(val, b, pad_to, charset):
+    if pad_to <= 500:
+        out = []
+        for _ in range(pad_to):
+            out.append(charset[val % b])
+            val //= b
+        return ''.join(reversed(out))
+        
+    half = pad_to // 2
+    divisor = b ** half
+    upper_val, lower_val = divmod(val, divisor)
+    upper_str = fast_base_convert(upper_val, b, pad_to - half, charset)
+    lower_str = fast_base_convert(lower_val, b, half, charset)
+    return upper_str + lower_str
+
+def fDecimal(d, b):
+    c = gChar(b)
+    if b == 1:
+        return c[0] * (d + 1)
+        
+    target = d * (b - 1) + b
+    
+    powers = [(1, b)]
+    while powers[-1][1] <= target:
+        powers.append((powers[-1][0] * 2, powers[-1][1] ** 2))
+        
+    n = 0
+    cur_bn = 1
+    for p_n, p_val in reversed(powers):
+        if cur_bn * p_val <= target:
+            cur_bn *= p_val
+            n += p_n
+            
+    geom_sum = (b ** n - b) // (b - 1) if n > 0 else 0
+    r = d - geom_sum
+    
+    if n == 0: return ""
+    return fast_base_convert(r, b, n, c)
+
+def tDecimal(c, b):
+    s = str(c)
+    l = len(s)
+    if b == 10:
+        return int(s) + ((10 ** l - 10) // 9 if l > 1 else 0)
+    if b == 16:
+        return int(s, 16) + ((16 ** l - 16) // 15 if l > 1 else 0)
+        
+    if b not in _TDEC_CACHE: _TDEC_CACHE[b] = {ch: i for i, ch in enumerate(gChar(b))}
+    char_map = _TDEC_CACHE[b]
+    
+    def _eval(start, end):
+        if end - start <= 200:
+            res = 0
+            for i in range(start, end):
+                res = res * b + char_map[s[i]]
+            return res
+        mid = (start + end) // 2
+        return _eval(start, mid) * (b ** (end - mid)) + _eval(mid, end)
+    
+    v = _eval(0, l)
+    geom_sum = (b ** l - b) // (b - 1) if b > 1 and l > 1 else (l - 1 if b == 1 and l > 1 else 0)
+    return v + geom_sum
+
+# --- ASCII/Binary Optimizations ---
 
 def hashKey(n): return getB(fetchKey(n))
 def fetchKey(n): return manipulateKey(tDecimal(manipulateData(getKey(checkData(n+90, (n % 7) + 1), 79), n), 10))
 def manipulateKey(n): return fDecimal(tDecimal(hex(n)[2:], 16) + int(fDecimal(n, 16), 16), 16)[-63:-1]
 def getKey(n, x=78): return next(str(n) for _ in iter(int, 1) if len(str(n := (n // 8) + int(Ep(str(n // 5), len(str(n)))))) <= x)
 
-def fromAnyBase(n, b):
-    res = 0
-    for p in n.split(): res = res * b + int(p)
-    return res
+def generateSeries(s, n): 
+    seed(s)
+    r = randint
+    return ''.join(str(r(0, 8)) for _ in range(n))
 
-def generateSeries(s, n): seed(s); return ''.join(str(randint(0, 8)) for _ in range(n))
-def manipulateData(s, c): k = generateSeries(c, len(str(s))); return ''.join(str((int(str(s)[i]) + int(k[i])) % 10) for i in range(len(str(s))))
-def inverseData(s, c): k = generateSeries(c, len(str(s))); return ''.join(str((int(str(s)[i]) - int(k[i])) % 10) for i in range(len(str(s))))
+def manipulateData(s, c): 
+    s_str = str(s)
+    k = generateSeries(c, len(s_str))
+    return ''.join(chr(((ord(a) + ord(b) - 96) % 10) + 48) for a, b in zip(s_str, k))
+
+def inverseData(s, c): 
+    s_str = str(s)
+    k = generateSeries(c, len(s_str))
+    return ''.join(chr(((ord(a) - ord(b)) % 10) + 48) for a, b in zip(s_str, k))
+
 def qRotate(s): return s[5:] + s[2:5][::-1] + s[:2]
 def pRotate(s): return s[-2:] + s[-5:-2][::-1] + s[:-5]
-def interject(s): s, p = (s[:-1], s[-1]) if len(s) % 2 else (s, ''); h = len(s) // 2; return ''.join(x + y for x, y in zip(s[:h], s[h:])) + p
-def inverJect(s): s, p = (s[:-1], s[-1]) if len(s) % 2 else (s, ''); return ''.join(s[i] for i in range(0, len(s), 2)) + ''.join(s[i] for i in range(1, len(s), 2)) + p
-def keySplit(n, k, y=1): m = str(k) if y == 1 else str(k)[::-1]; return [n := bSplit(n, int(d) + 2) for d in m][-1]
-def bSplit(s, f=4): s = bin(s)[3:]; return int('1' + ''.join(s[i:i+f][::-1] for i in range(0, len(s) - len(s) % f, f)) + s[len(s) - len(s) % f:], 2)
+
+def interject(s): 
+    s, p = (s[:-1], s[-1]) if len(s) % 2 else (s, '')
+    h = len(s) // 2
+    return ''.join(x + y for x, y in zip(s[:h], s[h:])) + p
+
+def inverJect(s): 
+    s, p = (s[:-1], s[-1]) if len(s) % 2 else (s, '')
+    return ''.join(s[i] for i in range(0, len(s), 2)) + ''.join(s[i] for i in range(1, len(s), 2)) + p
+
+def keySplit(n, k, y=1): 
+    m = str(k) if y == 1 else str(k)[::-1]
+    for d in m: n = bSplit(n, int(d) + 2)
+    return n
+
+def bSplit(s, f=4): 
+    b_str = bin(s)[3:]
+    l = len(b_str)
+    rem = l % f
+    res = ['1']
+    res.extend(b_str[i:i+f][::-1] for i in range(0, l - rem, f))
+    if rem: res.append(b_str[l-rem:])
+    return int(''.join(res), 2)
 
 def kSplit(s, k):
     s_bin = bin(s)[3:]
@@ -108,10 +246,40 @@ def kSplit(s, k):
 
     return int('1' + ''.join(chunks), 2)
 
+def baseSplit(n, k, b=8, y=1):
+    m = 2 ** 16
+    nDigits = fast_anyBase_list(n, b)
+    z = [x for x in fast_anyBase_list(k, m) if 2 <= len(x) <= 10]
+    if not z: z = [str((k % (m - 2)) + 2)]
+
+    cap = (len(nDigits) + 2) * 40
+    loops = 0
+    target_len = len(nDigits) + 1 if y == 1 else len(nDigits)
+
+    while len(z) < target_len:
+        next_k = int(z[-1]) + m
+        z.extend(x for x in fast_anyBase_list(next_k, m) if 2 <= len(x) <= 10)
+        loops += 1
+        if loops > cap: break
+
+    if len(z) < target_len: z.extend([z[-1]] * (target_len - len(z)))
+
+    if y == 1:
+        guard = (1 - (int(z[0]) % b)) % b
+        nDigits = [str(guard)] + nDigits
+        return fromAnyBase([str((int(x) + int(zv)) % b) for x, zv in zip(nDigits, z)], b)
+
+    outDigits = [str((int(x) - int(zv)) % b) for x, zv in zip(nDigits, z)]
+    return 0 if len(outDigits) <= 1 else fromAnyBase(outDigits[1:], b)
+
 def Ap(n, m, p): return str(int(n) * int(m))[:p]
-def Bp(n, p): return ''.join(str((int(n[i % len(n)]) + int(n[0])) % 10) for i in range(p))
+def Bp(n, p): 
+    n0 = ord(n[0]) - 48
+    return ''.join(chr(((ord(n[i % len(n)]) - 48 + n0) % 10) + 48) for i in range(p))
 def Cp(n, m, p): return str(int(n) * int(n[:3 % len(n)]))[:p]
-def Dp(n, m, p): return (''.join(str(abs(int(n[i % len(n)]) * int(m[i % len(m)]))) for i in range(p)))[:p]
+def Dp(n, m, p): 
+    ln, lm = len(n), len(m)
+    return (''.join(str(abs((ord(n[i % ln]) - 48) * (ord(m[i % lm]) - 48))) for i in range(p)))[:p]
 def Ep(n, p): return str(sum(map(int, ' '.join(str(math.pi * (1/(int(n[i % len(n)]) + 1)/(int(n[(i+1) % len(n)]) + 1)) - int(math.pi * (1/(int(n[i % len(n)]) + 1)/(int(n[(i+1) % len(n)]) + 1))))[2:] for i in range(p)).split())))[-p:]
 
 def processKey(n, m=0):
@@ -125,50 +293,6 @@ def processKey(n, m=0):
     n = str(bSplit(bSplit(int(n) + int(pRotate(n)))))
     n = tDecimal(qRotate(str(n)), 10)
     return str(int(int(n) + int(a + b + '0' * (p-2))) + int(m))[-p:]
-
-def fDecimal(d, b):
-    c, n, r = gChar(b), 1, d
-    bn = b
-    while r >= bn: r -= bn; n += 1; bn *= b
-    if n == 0: return ""
-    out = []
-    for _ in range(n):
-        out.append(c[r % b])
-        r //= b
-    return ''.join(reversed(out)).zfill(n)
-
-def tDecimal(c, b):
-    if b not in _TDEC_CACHE: _TDEC_CACHE[b] = {ch: i for i, ch in enumerate(gChar(b))}
-    char_map, s = _TDEC_CACHE[b], str(c)
-    l = len(s)
-    v = sum(char_map[ch] * (b ** i) for i, ch in enumerate(reversed(s)))
-    geom_sum = (b ** l - b) // (b - 1) if b > 1 and l > 1 else (l - 1 if b == 1 and l > 1 else 0)
-    return v + geom_sum
-
-def baseSplit(n, k, b=8, y=1):
-    m = 2 ** 16
-    nDigits = anyBase(n, b).split()
-    z = [x for x in anyBase(k, m).split() if 2 <= len(x) <= 10]
-    if not z: z = [str((k % (m - 2)) + 2)]
-
-    cap = (len(nDigits) + 2) * 40
-    loops = 0
-    target_len = len(nDigits) + 1 if y == 1 else len(nDigits)
-
-    while len(z) < target_len:
-        z.extend(x for x in anyBase(k, int(z[-1]) + m).split() if 2 <= len(x) <= 10)
-        loops += 1
-        if loops > cap: break
-
-    if len(z) < target_len: z.extend([z[-1]] * (target_len - len(z)))
-
-    if y == 1:
-        guard = (1 - (int(z[0]) % b)) % b
-        nDigits = [str(guard)] + nDigits
-        return fromAnyBase(' '.join(str((int(x) + int(zv)) % b) for x, zv in zip(nDigits, z)), b)
-
-    outDigits = [str((int(x) - int(zv)) % b) for x, zv in zip(nDigits, z)]
-    return 0 if len(outDigits) <= 1 else fromAnyBase(' '.join(outDigits[1:]), b)
 
 def fold64(h):
     h = ''.join(c for c in h.lower() if c in '0123456789abcdef')
