@@ -10,6 +10,7 @@ sys.set_int_max_str_digits(0)
 # =========================
 # Hardcoded character base (portable)
 # Build Version: 35F
+# NOTES: Builds prior to Build 35F no longer use the same encryption or decryption
 # =========================
 gCharBase = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.:;<>?@[]^&()*$%/\\`\"',_!#"
 def gChar(c): return gCharBase[:c]

@@ -9,7 +9,8 @@ sys.set_int_max_str_digits(0)
 
 # =========================
 # Hardcoded character base (portable)
-# Build Version: 35F
+# Build Version: 38A
+# NOTES: Builds prior to Build 38A no longer use the same encryption or decryption
 # =========================
 gCharBase = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.:;<>?@[]^&()*$%/\\`\"',_!#"
 def gChar(c): return gCharBase[:c]
@@ -624,7 +625,6 @@ def dData(n, keys, b):
 def encryptData(n, k=0):
     if not isinstance(n, str):
         raise ValueError("encryptData expects a string")
-
     if _plainSizeBytes(n) <= 2048:
         n = toBytes(n)
         if k:
@@ -635,70 +635,55 @@ def encryptData(n, k=0):
             hKey, e = hashKey(n)
         key0 = tDecimal(hKey, 16)
         b = e
-
         keys = [key0]
         key = key0
         for _ in range(9):
             key = int(processKey(key))
             keys.append(key)
-
         n = n + (key // b)
         n = pData(n, keys, b)
         return fDecimal(n, 62), hKey
-
     if k:
         if not isHex64(k): raise ValueError("personalKey must be exactly 64 hex digits")
         hKey = k.lower()
     else:
         hKey = shepKeyFromString(n)
-
     rawBytes = n.encode("utf-16-le", errors="surrogatepass")
     compBytes = zlib.compress(rawBytes, 9)
     parts = _chunkBytes(compBytes, 2048)
-
     totalSteps = len(parts) + 3
     done = 0
-
     cipherParts = []
     lens = []
-
     for p in parts:
         done += 1
         _printProg("ENC", done, totalSteps)
         cPart = _encryptIntWithKey(_toBytesBin(p), hKey)
         cipherParts.append(cPart)
         lens.append(len(cPart))
-
     joinedCipher = "".join(cipherParts)
     header = _buildHeader(2048, len(rawBytes), len(compBytes), lens)
     payload = header + joinedCipher
-
     mixed = _obfuscateProg(payload, hKey, 64, "ENC", done, totalSteps)
     return mixed, hKey
 
 def decryptData(n, k):
     if not isHex64(k): raise ValueError("personalKey must be exactly 64 hex digits")
     k = k.lower()
-
     if isinstance(n, str):
         payloadGuess = None
         try:
             payloadGuess = deobfuscate(n, k, 64)
         except Exception:
             payloadGuess = None
-
         if payloadGuess and payloadGuess.startswith("shz1") and "a0a0" in payloadGuess:
             header, body, chunkSize, origLen, compLen, lens = _parseHeader(payloadGuess)
-
             totalSteps = len(lens) + 3
             done = 0
-
             payload = _deobfuscateProg(n, k, 64, "DEC", done, totalSteps)
             header, body, chunkSize, origLen, compLen, lens = _parseHeader(payload)
-
             compOut = bytearray()
             pos = 0
-
             for L in lens:
                 done += 1
                 _printProg("DEC", done, totalSteps)
@@ -706,22 +691,16 @@ def decryptData(n, k):
                 pos += L
                 pInt = _decryptIntWithKey(cPart, k)
                 compOut.extend(_fromBytesBin(pInt))
-
             if len(compOut) != compLen:
                 raise ValueError("compressed length mismatch")
-
             rawBytes = zlib.decompress(bytes(compOut))
-
             if len(rawBytes) != origLen:
                 raise ValueError("original length mismatch")
-
             return rawBytes.decode("utf-16-le", errors="surrogatepass")
-
     e = getE(k)
     key0 = tDecimal(k, 16)
     b = e
     n = tDecimal(n, 62)
-
     keys = [key0]
     key = key0
     for _ in range(9):
@@ -746,26 +725,15 @@ def generatePKey(n=0):
     base62 = "".join(s)
     return hashKey(tDecimal(base62, 62))[0].lower()
 
-if __name__ == "__main__":
-    n = "Andrew Lehti"
-    c, k = encryptData(n)
-    print(c, k)
-    print(decryptData(c, k))
-
-    pKey = generatePKey("my personal key phrase")
-    c2, k2 = encryptData(n, pKey)
-    print(pKey, k2)
-    print(decryptData(c2, pKey))
-
 # =========================
 # CLI HELPERS
 # =========================
 
 import json
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
-DOC_EXTS = {".pdf", ".doc", ".docx", ".txt", ".rtf", ".odt", ".md", ".csv", ".xls", ".xlsx"}
+DOC_EXTS = {".pdf", ".doc", ".docx", ".txt", ".rtf", ".odt", ".md", ".csv", ".xls", ".xlsx", ".json", ".tsv"}
 ALLOWED_DEC_EXTS = {".shep32", ".sh3", ".sh32", ""}
 
 KEY_HEADER = "-----BEGIN SHEP32 KEY-----\n"
@@ -776,10 +744,8 @@ META_DELIM = b"\n---\n"
 
 DEFAULT_MAX_BYTES = 1000 * 1024
 
-
 def printErr(msg):
     print(f"ERROR: {msg}", file=sys.stderr)
-
 
 def isDirPath(p):
     try:
@@ -787,27 +753,21 @@ def isDirPath(p):
     except Exception:
         return False
 
-
 def sanitizeHex64(s):
     t = "".join(ch for ch in str(s).lower().strip() if ch in "0123456789abcdef")
     return t
 
-
 def readTextFile(path):
     return Path(path).read_text(encoding="utf-8", errors="replace")
-
 
 def writeTextFile(path, s):
     Path(path).write_text(s, encoding="utf-8", errors="strict")
 
-
 def readBinFile(path):
     return Path(path).read_bytes()
 
-
 def writeBinFile(path, b):
     Path(path).write_bytes(b)
-
 
 def parseKeyFileText(text):
     t = text.strip().replace("\r\n", "\n")
@@ -825,36 +785,29 @@ def parseKeyFileText(text):
             return s
     raise ValueError("Invalid .pkey format (expected header/footer with 64-hex inside, or a bare 64-hex line).")
 
-
 def loadKeyFromFile(path):
     return parseKeyFileText(readTextFile(path))
-
 
 def formatKeyFile(hex64):
     return f"{KEY_HEADER}{hex64.lower()}{KEY_FOOTER}"
 
-
 def writeKeyFile(path, hex64):
     writeTextFile(path, formatKeyFile(hex64))
-
 
 def validateFileCap(filePath, noLimit):
     size = Path(filePath).stat().st_size
     if (not noLimit) and size > DEFAULT_MAX_BYTES:
-        raise ValueError(f"File exceeds 100KB limit ({size} bytes). Use --no-limit to override.")
-
+        raise ValueError(f"File exceeds 1000KB limit ({size} bytes). Use --no-limit to override.")
 
 def validateDecExtension(filePath, force):
     ext = Path(filePath).suffix.lower()
     if not force and ext not in ALLOWED_DEC_EXTS:
         raise ValueError(f"Invalid decrypt extension '{ext}'. Allowed: .shep32 .sh3 .sh32 or no extension (use --force to override).")
 
-
 def defaultEncOutPath(inPath):
     p = Path(inPath)
     outExt = ".sh3" if p.suffix.lower() in DOC_EXTS else ".shep32"
     return str(p.with_suffix(outExt))
-
 
 def chooseEncOutPath(inPath, outArg):
     if not outArg:
@@ -865,14 +818,12 @@ def chooseEncOutPath(inPath, outArg):
         return str(Path(outArg) / (p.stem + outExt))
     return str(outArg)
 
-
 def chooseDecOutPath(srcPath, restoredName, outArg):
     if not outArg:
         return str(Path(srcPath).with_name(restoredName))
     if isDirPath(outArg):
         return str(Path(outArg) / restoredName)
     return str(outArg)
-
 
 def readStdinPayload(delim=None):
     data = sys.stdin.read()
@@ -885,7 +836,6 @@ def readStdinPayload(delim=None):
             raise ValueError(f"Delimiter block not found. Expected markers:\n{start}\n...\n{end}")
         return data[a + len(start):b].strip()
     return data.rstrip("\n\r")
-
 
 def resolveKeyFromArgs(args, require=False):
     provided = 0
@@ -912,7 +862,6 @@ def resolveKeyFromArgs(args, require=False):
 
     return ""  # empty means "auto-key" path
 
-
 def packFilePayload(filePath, dataBytes):
     p = Path(filePath)
     name = p.stem
@@ -920,7 +869,6 @@ def packFilePayload(filePath, dataBytes):
     sizeStr = str(len(dataBytes)).encode("utf-8")
     header = META_HEADER + name.encode("utf-8", errors="strict") + b"\n" + ext.encode("utf-8", errors="strict") + b"\n" + sizeStr + META_DELIM
     return header + dataBytes
-
 
 def unpackFilePayload(payloadBytes):
     if not payloadBytes.startswith(META_HEADER):
@@ -942,20 +890,17 @@ def unpackFilePayload(payloadBytes):
     except Exception:
         return None
 
-
 def toBytesRaw(dataBytes):
     if not isinstance(dataBytes, (bytes, bytearray)):
         raise TypeError("toBytesRaw expects bytes")
     b = b"\x01" + bytes(dataBytes)
     return int.from_bytes(b, "big")
 
-
 def fromBytesRaw(n):
     b = n.to_bytes((n.bit_length() + 7) // 8, "big")
     if not b or b[0] != 1:
         raise ValueError("byte sentinel missing")
     return b[1:]
-
 
 def encryptBytes(dataBytes, keyHexOrZero=0):
     n = toBytesRaw(dataBytes)
@@ -979,7 +924,6 @@ def encryptBytes(dataBytes, keyHexOrZero=0):
     n = pData(n, keys, b)
     return fDecimal(n, 62), hKey
 
-
 def decryptBytes(cipherStr, keyHex):
     if not isHex64(keyHex):
         raise ValueError("personalKey must be exactly 64 hex digits")
@@ -999,10 +943,8 @@ def decryptBytes(cipherStr, keyHex):
     n = n - (key // b)
     return fromBytesRaw(n)
 
-
 def emitJson(obj):
     print(json.dumps(obj, ensure_ascii=False))
-
 
 def cmdKey(args):
     k = generatePKey(args.passphrase).lower() if args.passphrase else generatePKey().lower()
@@ -1020,7 +962,6 @@ def cmdKey(args):
         print(k)
     return 0
 
-
 def cmdEnc(args):
     k = resolveKeyFromArgs(args, require=False)
     keyArg = k if k else 0
@@ -1029,6 +970,7 @@ def cmdEnc(args):
         fp = args.file
         if not Path(fp).exists():
             raise FileNotFoundError(fp)
+
         validateFileCap(fp, args.no_limit)
 
         data = readBinFile(fp)
@@ -1041,12 +983,53 @@ def cmdEnc(args):
         if args.write_key:
             writeKeyFile(args.write_key, used)
 
+        else:
+            print("")
+            print("Remember to save your key or else you cannot decrypt your file.")
+
+            choice = input(
+                "Would you like it displayed in terminal or saved as a key file? [d/s] (default: s): "
+            ).strip().lower()
+
+            if choice in {"", "s", "save"}:
+                outP = Path(outPath)
+                defaultKeyPath = str(outP.with_suffix(outP.suffix + ".pkey"))
+
+                nameOrPath = input(
+                    "Name/path for key file (blank = default next to encrypted file): "
+                ).strip()
+
+                if nameOrPath:
+                    kp = Path(normUserPath(nameOrPath))
+
+                    if isDirPath(kp):
+                        keyPath = str(Path(kp) / Path(defaultKeyPath).name)
+                    else:
+                        keyPath = str(kp)
+                        if not keyPath.lower().endswith(".pkey"):
+                            keyPath += ".pkey"
+                else:
+                    keyPath = defaultKeyPath
+
+                writeKeyFile(keyPath, used)
+                print(f"Wrote key file: {keyPath}", file=sys.stderr)
+
+            else:
+                if not args.quiet_key:
+                    print(used)
+
         if args.json:
-            emitJson({"ok": True, "mode": "enc", "input": "file", "out": outPath, "key": used, "cipher_len": len(c)})
+            emitJson({
+                "ok": True,
+                "mode": "enc",
+                "input": "file",
+                "out": outPath,
+                "key": used,
+                "cipher_len": len(c)
+            })
         else:
             print(outPath)
-            if not args.quiet_key:
-                print(used)
+
         return 0
 
     if args.stdin:
@@ -1061,22 +1044,37 @@ def cmdEnc(args):
 
     if args.out:
         writeTextFile(args.out, c)
+
         if args.json:
-            emitJson({"ok": True, "mode": "enc", "input": "text", "out": args.out, "key": used, "cipher_len": len(c)})
+            emitJson({
+                "ok": True,
+                "mode": "enc",
+                "input": "text",
+                "out": args.out,
+                "key": used,
+                "cipher_len": len(c)
+            })
         else:
             print(args.out)
             if not args.quiet_key:
                 print(used)
+
         return 0
 
     if args.json:
-        emitJson({"ok": True, "mode": "enc", "input": "text", "ciphertext": c, "key": used})
+        emitJson({
+            "ok": True,
+            "mode": "enc",
+            "input": "text",
+            "ciphertext": c,
+            "key": used
+        })
     else:
         print(c)
         if not args.quiet_key:
             print(used)
-    return 0
 
+    return 0
 
 def cmdDec(args):
     k = resolveKeyFromArgs(args, require=True)
@@ -1133,7 +1131,21 @@ def cmdDec(args):
     else:
         ct = args.text.strip()
 
-    pt = decryptData(ct, k)
+    payloadBytes = decryptBytes(ct, k)
+    unpacked = unpackFilePayload(payloadBytes)
+
+    if unpacked and not args.as_text:
+        restoredName, raw = unpacked
+        outPath = args.out or restoredName
+        writeBinFile(outPath, raw)
+        if args.json:
+            emitJson({"ok": True, "mode": "dec", "input": "text", "out": outPath, "restored_name": restoredName})
+        else:
+            print(outPath)
+        return 0
+
+    # Plaintext path
+    pt = payloadBytes.decode("utf-16-le", errors="surrogatepass")
 
     if args.out:
         writeTextFile(args.out, pt)
@@ -1149,6 +1161,214 @@ def cmdDec(args):
         print(pt)
     return 0
 
+def normUserPath(s):
+    if s is None:
+        return ""
+    s = str(s).strip()
+    if not s:
+        return ""
+    s = os.path.expandvars(s)
+    s = os.path.expanduser(s)
+    return s
+
+def existingFile(p):
+    try:
+        x = Path(p)
+        return x.exists() and x.is_file()
+    except Exception:
+        return False
+
+def existingDir(p):
+    try:
+        x = Path(p)
+        return x.exists() and x.is_dir()
+    except Exception:
+        return False
+
+def tryPathVariants(rawPath):
+    rawPath = normUserPath(rawPath)
+    if not rawPath:
+        return []
+
+    p = Path(rawPath)
+
+    variants = []
+
+    # 1) As entered (after ~ and env expansion.)
+    variants.append(p)
+
+    # 2) Relative to CWD if not absolute.
+    if not p.is_absolute():
+        variants.append(Path.cwd() / p)
+
+    # 3) Relative to HOME if not absolute.
+    home = Path.home()
+    if not p.is_absolute():
+        variants.append(home / p)
+        
+    # 4) If user typed like "docs/example.md" and the folder exists under HOME, try that
+    seen = set()
+    out = []
+    for v in variants:
+        try:
+            key = str(v)
+        except Exception:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(v)
+    return out
+
+def firstExistingFile(rawPath):
+    for v in tryPathVariants(rawPath):
+        if existingFile(v):
+            return str(Path(v).resolve())
+    return None
+
+def bestEffortSearchRoots():
+    roots = []
+    roots.append(Path.cwd())
+    roots.append(Path.home())
+
+    mnt = Path("/mnt") # WSL common mount (harmless if missing.)
+    if mnt.exists() and mnt.is_dir():
+        roots.append(mnt)
+
+    seen = set()
+    out = []
+    for r in roots:
+        try:
+            rr = r.resolve()
+        except Exception:
+            rr = r
+        k = str(rr)
+        if k in seen:
+            continue
+        seen.add(k)
+        if rr.exists() and rr.is_dir():
+            out.append(rr)
+    return out
+
+import difflib
+
+def _sim(a, b):
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+def _walkLimited(root, maxDepth=6, maxFiles=40000):
+    root = Path(root)
+    rootParts = len(root.parts)
+    filesSeen = 0
+    for dirpath, dirnames, filenames in os.walk(root):
+        try:
+            d = Path(dirpath)
+            depth = len(d.parts) - rootParts
+            if depth > maxDepth:
+                dirnames[:] = []
+                continue
+        except Exception:
+            continue
+
+        for fn in filenames:
+            filesSeen += 1
+            if filesSeen > maxFiles:
+                return
+            yield d, fn
+
+def fuzzyFindInRoot(root, rawPath, maxHits=3, maxDepth=6, maxFiles=40000):
+    raw = normUserPath(rawPath)
+    p = Path(raw)
+    targetName = p.name if p.name else raw
+    targetStem = Path(targetName).stem
+    targetExt = Path(targetName).suffix
+
+    scored = []
+    for d, fn in _walkLimited(root, maxDepth=maxDepth, maxFiles=maxFiles):
+        cand = Path(fn)
+        candStem = cand.stem
+        candExt = cand.suffix
+
+        # Score components (stem matters most; ext helps)
+        sStem = _sim(targetStem.lower(), candStem.lower())
+        sName = _sim(targetName.lower(), fn.lower())
+
+        # Prefer same extension when user supplied one
+        extBonus = 0.0
+        if targetExt:
+            extBonus = 0.12 if candExt.lower() == targetExt.lower() else -0.08
+
+        # Prefer closer directory to root slightly (keeps results sane)
+        try:
+            depthPenalty = (len(d.parts) - len(Path(root).parts)) * 0.01
+        except Exception:
+            depthPenalty = 0.0
+
+        score = (0.65 * sStem) + (0.35 * sName) + extBonus - depthPenalty
+
+        if score >= 0.62:
+            scored.append((score, str((d / fn).resolve())))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    out = []
+    seen = set()
+    for _, pathStr in scored:
+        if pathStr in seen:
+            continue
+        seen.add(pathStr)
+        out.append(pathStr)
+        if len(out) >= maxHits:
+            break
+    return out
+
+def rankSuggestions(rawPath):
+    raw = normUserPath(rawPath)
+    p = Path(raw)
+
+    roots = []
+
+    # 1) If user gave a parent dir that exists, search there first (tightest intent)
+    try:
+        if p.parent and existingDir(p.parent):
+            roots.append(p.parent)
+    except Exception:
+        pass
+
+    # 2) CWD and HOME next
+    roots.extend(bestEffortSearchRoots())
+
+    # Dedup roots
+    rSeen = set()
+    r2 = []
+    for r in roots:
+        try:
+            rr = Path(r).resolve()
+        except Exception:
+            rr = Path(r)
+        k = str(rr)
+        if k in rSeen:
+            continue
+        rSeen.add(k)
+        if rr.exists() and rr.is_dir():
+            r2.append(rr)
+
+    # Fuzzy search: tight roots first, then broader
+    hits = []
+    for i, r in enumerate(r2):
+        depth = 4 if i == 0 else 6 if i == 1 else 8
+        files = 20000 if i == 0 else 35000 if i == 1 else 60000
+        found = fuzzyFindInRoot(r, rawPath, maxHits=6, maxDepth=depth, maxFiles=files)
+        for f in found:
+            if f not in hits:
+                hits.append(f)
+            if len(hits) >= 3:
+                return hits[:3]
+
+    return hits[:3]
+
+# =========================
+# WIZARD and EXCEPTIONS
+# =========================
 
 def interactiveWizard():
     print("SHEP32 Interactive Wizard")
@@ -1158,37 +1378,57 @@ def interactiveWizard():
         return 0
 
     if choice == "3":
-        phrase = input("Passphrase (blank = random): ").strip()
-        k = generatePKey(phrase).lower() if phrase else generatePKey().lower()
-        print(k)
-        save = input("Save to .pkey file? (path or blank): ").strip()
-        if save:
-            writeKeyFile(save, k)
-            print(f"Wrote {save}", file=sys.stderr)
-        return 0
+        try:
+            phrase = input("Passphrase (blank = random): ").strip()
+            k = generatePKey(phrase).lower() if phrase else generatePKey().lower()
+            print(k)
+            save = input("Save to .pkey file? (path/blank to skip): ").strip()
+            if save:
+                writeKeyFile(save, k)
+                print(f"Wrote {save}", file=sys.stderr)
+            return 0
+        except Exception as e:
+            printErr(str(e))
+            return 2
 
     isEnc = (choice == "1")
-    kind = input("Input type: 1) File  2) Text : ").strip()
+    kind = input("Input type:    1) File  2) Text : ").strip()
+
     if kind == "1":
-        fp = input("File path: ").strip()
+        fpRaw = input("File path: ").strip()
+        fp = wizardPickExistingPath(fpRaw, label="File")
+        if not fp:
+            return 0
+
         if isEnc:
             class A: pass
             a = A()
             a.file = fp; a.text = None; a.stdin = False; a.delim = None
             a.key = None; a.passphrase = None; a.keyfile = None
             a.out = None; a.no_limit = False; a.quiet_key = False; a.write_key = None; a.json = False
-            return cmdEnc(a)
+            try:
+                return cmdEnc(a)
+            except Exception as e:
+                printErr(str(e))
+                return 2
+
         class B: pass
         b = B()
         b.file = fp; b.text = None; b.stdin = False; b.delim = None
         b.key = input("Key (64-hex) or blank to use keyfile/passphrase: ").strip() or None
         b.passphrase = None; b.keyfile = None
         b.out = None; b.as_text = False; b.force = False; b.json = False
+
         if not b.key:
             b.keyfile = input("Keyfile (.pkey) path or blank: ").strip() or None
             if not b.keyfile:
                 b.passphrase = input("Passphrase or blank: ").strip() or None
-        return cmdDec(b)
+
+        try:
+            return cmdDec(b)
+        except Exception as e:
+            printErr(str(e))
+            return 2
 
     if kind == "2":
         if isEnc:
@@ -1198,7 +1438,12 @@ def interactiveWizard():
             a.file = None; a.text = pt; a.stdin = False; a.delim = None
             a.key = None; a.passphrase = None; a.keyfile = None
             a.out = None; a.no_limit = False; a.quiet_key = False; a.write_key = None; a.json = False
-            return cmdEnc(a)
+            try:
+                return cmdEnc(a)
+            except Exception as e:
+                printErr(str(e))
+                return 2
+
         ct = input("Ciphertext (base62): ").strip()
         class B: pass
         b = B()
@@ -1206,11 +1451,50 @@ def interactiveWizard():
         b.key = input("Key (64-hex): ").strip()
         b.passphrase = None; b.keyfile = None
         b.out = None; b.as_text = True; b.force = False; b.json = False
-        return cmdDec(b)
+        try:
+            return cmdDec(b)
+        except Exception as e:
+            printErr(str(e))
+            return 2
 
     printErr("Unknown selection.")
     return 2
+    printErr("Unknown selection.")
+    return 2
 
+def wizardPickExistingPath(rawPath, label="File"):
+    rawPath = str(rawPath).strip()
+    resolved = firstExistingFile(rawPath)
+    if resolved:
+        return resolved
+
+    tried = [str(v) for v in tryPathVariants(rawPath)]
+    print(f"Could not find {label}: {rawPath}")
+    print("Tried:")
+    for t in tried:
+        print(f" - {t}")
+
+    sug = rankSuggestions(rawPath)
+    if not sug:
+        print("No suggestions found.")
+        return None
+
+    print("\nSuggestions:")
+    for i, s in enumerate(sug, 1):
+        print(f"{i}) {s}")
+    print("4) Quit")
+
+    while True:
+        pick = input("> ").strip()
+        if pick == "4":
+            return None
+        if pick in {"1", "2", "3"}:
+            idx = int(pick) - 1
+            if idx < len(sug) and existingFile(sug[idx]):
+                return str(Path(sug[idx]).resolve())
+            print("That selection is no longer available.")
+            return None
+        print("Choose 1, 2, 3, or 4.")
 
 def buildParser():
     parser = argparse.ArgumentParser(
@@ -1283,8 +1567,12 @@ def main(argv=None):
             return interactiveWizard()
         parser.print_help()
         return 2
-
     try:
+        if args.cmd is None:
+            if argv is None and len(sys.argv) == 1:
+                return interactiveWizard()
+            parser.print_help()
+            return 2
         if args.cmd == "start":
             return interactiveWizard()
         if args.cmd == "key":
@@ -1293,6 +1581,7 @@ def main(argv=None):
             return cmdEnc(args)
         if args.cmd == "dec":
             return cmdDec(args)
+
         printErr("Unknown command.")
         return 2
     except FileNotFoundError as e:
@@ -1307,6 +1596,5 @@ def main(argv=None):
     except Exception as e:
         printErr(f"Unexpected runtime error: {e}")
         return 1
-
 if __name__ == "__main__":
     raise SystemExit(main())
