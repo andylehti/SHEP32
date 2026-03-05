@@ -9,8 +9,7 @@ sys.set_int_max_str_digits(0)
 
 # =========================
 # Hardcoded character base (portable)
-# Build Version: 35F
-# NOTES: Builds prior to Build 35F no longer use the same encryption or decryption
+# Build Version: 40A
 # =========================
 gCharBase = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.:;<>?@[]^&()*$%/\\`\"',_!#"
 def gChar(c): return gCharBase[:c]
@@ -359,14 +358,16 @@ def deriveSeeds(keyHex, steps):
         out[i] = cum or 1
     return out
 
-def obfuscate(text, keyHex, steps=64):
+def obfuscate(text, keyHex):
+    steps = len(str(keyHex))
     seeds = deriveSeeds(keyHex, steps)
     t = text
     for s in seeds:
         t = permuteBySeed(t, s)
     return t
 
-def deobfuscate(obfText, keyHex, steps=64):
+def deobfuscate(obfText, keyHex):
+    steps = len(str(keyHex))
     seeds = deriveSeeds(keyHex, steps)
     t = obfText
     for s in reversed(seeds):
@@ -558,9 +559,28 @@ def processKey(n, m=0):
     n = tDecimal(qRotate(str(n)), 10)
     return str(int(int(n) + int(a + b + "0" * (p - 2))) + int(m))[-p:]
 
-def checkData(n, i):
-    while n < ten79: n *= 3; n, i = n + i, i + i
-    s = str(n); n = sum(int(s[j:j+80]) for j in range(0, len(s), 80))
+def checkData(n, i=10):
+    if not isinstance(n, int) or not isinstance(i, int): raise TypeError("n and i must be int") # potential fix
+    if n < 0 or i < 0: raise ValueError("n and i must be >= 0")
+    
+    n += 32
+    ln = len(str(n))
+    ten79 = 10 ** 79
+
+    while n < ten79:
+        n *= 3
+        n, i = n + i, i + i
+
+    i = 10 * (2**163)
+    n = int(str(n) + ("0" * 16) + str(ln))
+
+    for _ in range(8):
+        n *= 3
+        n, i = n + i, i + i
+
+    n = int(str(n * i) + ("0" * 8)) + i
+    s = str(n)
+    n = sum(int(s[j:j+80]) for j in range(0, len(s), 80))
     return kSplit((int(qRotate(str(bSplit(n))) + processKey(n))), n)
 
 def fold64(h):

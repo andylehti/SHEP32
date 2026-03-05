@@ -558,9 +558,28 @@ def processKey(n, m=0):
     n = tDecimal(qRotate(str(n)), 10)
     return str(int(int(n) + int(a + b + "0" * (p - 2))) + int(m))[-p:]
 
-def checkData(n, i):
-    while n < ten79: n *= 3; n, i = n + i, i + i
-    s = str(n); n = sum(int(s[j:j+80]) for j in range(0, len(s), 80))
+def checkData(n, i=10):
+    if not isinstance(n, int) or not isinstance(i, int): raise TypeError("n and i must be int") # potential fix
+    if n < 0 or i < 0: raise ValueError("n and i must be >= 0")
+    
+    n += 32
+    ln = len(str(n))
+    ten79 = 10 ** 79
+
+    while n < ten79:
+        n *= 3
+        n, i = n + i, i + i
+
+    i = 10 * (2**163)
+    n = int(str(n) + ("0" * 16) + str(ln))
+
+    for _ in range(8):
+        n *= 3
+        n, i = n + i, i + i
+
+    n = int(str(n * i) + ("0" * 8)) + i
+    s = str(n)
+    n = sum(int(s[j:j+80]) for j in range(0, len(s), 80))
     return kSplit((int(qRotate(str(bSplit(n))) + processKey(n))), n)
 
 def fold64(h):
