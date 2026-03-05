@@ -1,4 +1,3 @@
-#29B
 import streamlit as st
 import math, os, sys, time, string, hashlib, base64, re
 from random import seed, randint, choice
@@ -8,6 +7,7 @@ sys.set_int_max_str_digits(0)
 
 # =========================
 # SHEP32 CORE
+# BUILD: 29B
 # =========================
 
 _GCHAR_BASE = ''.join([x for x in string.printable[:90] if x not in '/\\`"\',_!#$%&()* +-=']) + '&()*$%/\\`"\',_!#'

@@ -1,0 +1,1364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SHEP-32 Series Hash Algorithm</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-slate-950 text-slate-200 font-sans selection:bg-cyan-500/30">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // --- INLINE ICONS ---
+        const Shield = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>;
+        const Copy = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>;
+        const Check = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>;
+        const Terminal = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>;
+        const Cpu = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line><line x1="20" y1="9" x2="23" y2="9"></line><line x1="20" y1="14" x2="23" y2="14"></line><line x1="1" y1="9" x2="4" y2="9"></line><line x1="1" y1="14" x2="4" y2="14"></line></svg>;
+        const RefreshCw = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>;
+        const Github = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>;
+        const BarChart3 = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><rect width="4" height="7" x="7" y="10" rx="1"/><rect width="4" height="12" x="15" y="5" rx="1"/></svg>;
+        const Download = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>;
+        const Play = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>;
+        const Square = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/></svg>;
+        const Binary = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="14" y="14" width="4" height="6" rx="2"/><rect x="6" y="4" width="4" height="6" rx="2"/><path d="M6 20h4"/><path d="M14 10h4"/><path d="M6 14h2v6"/><path d="M14 4h2v6"/></svg>;
+
+        /**
+         * UTILITY: Manual BigInt Power function
+         */
+        function bigIntPow(base, exp) {
+          let b = BigInt(base);
+          let e = BigInt(exp);
+          let res = BigInt(1);
+          while (e > BigInt(0)) {
+            if (e % BigInt(2) === BigInt(1)) res *= b;
+            b *= b;
+            e /= BigInt(2);
+          }
+          return res;
+        }
+
+        /**
+         * UTILITY: Python-style Modulo
+         */
+        function pyMod(n, m) {
+          const bn = BigInt(n);
+          const bm = BigInt(m);
+          return ((bn % bm) + bm) % bm;
+        }
+
+        /**
+         * CORE LOGIC - SHEP-32 IMPLEMENTATION
+         */
+        const PI = 3.141592653589793;
+        const gCharBase = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.:;<>?@[]^&()*$%/\\`\"',_!#";
+        const ten79 = bigIntPow(10, 79);
+        const digits16 = "0123456789abcdef";
+        const tDecCache = new Map();
+
+        function gChar(c) { return gCharBase.slice(0, Number(c)); }
+
+        function splitWs(s) {
+          const str = String(s);
+          const words = [];
+          let cur = "";
+          for (let i = 0; i < str.length; i++) {
+            const ch = str[i];
+            if (ch <= " ") {
+              if (cur.length) { words.push(cur); cur = ""; }
+            } else { cur += ch; }
+          }
+          if (cur.length) words.push(cur);
+          return words;
+        }
+
+        function parseDec(s) {
+          if (!s) return BigInt(0);
+          let res = BigInt(0);
+          for (let i = 0; i < s.length; i++) {
+            const d = s.charCodeAt(i) - 48;
+            res = res * BigInt(10) + BigInt(d);
+          }
+          return res;
+        }
+
+        function parseHex(s) {
+          let res = BigInt(0);
+          const clean = String(s).toLowerCase();
+          for (let i = 0; i < clean.length; i++) {
+            const o = clean.charCodeAt(i);
+            let v = (o >= 48 && o <= 57) ? o - 48 : 10 + (o - 97);
+            res = res * BigInt(16) + BigInt(v);
+          }
+          return res;
+        }
+
+        function toHexSmall(n) {
+          let x = BigInt(n);
+          if (x === BigInt(0)) return "0";
+          let out = "";
+          while (x > BigInt(0)) {
+            out = digits16[Number(x % BigInt(16))] + out;
+            x /= BigInt(16);
+          }
+          return out;
+        }
+
+        function hexLower(n) {
+          let x = BigInt(n);
+          if (x === BigInt(0)) return "0";
+          const base = bigIntPow(16, 6);
+          const chunks = [];
+          while (x > BigInt(0)) { chunks.push(x % base); x /= base; }
+          chunks.reverse();
+          let out = toHexSmall(chunks[0]);
+          for (let i = 1; i < chunks.length; i++) {
+            out += toHexSmall(chunks[i]).padStart(6, "0");
+          }
+          return out;
+        }
+
+        function toBinSmall(n) {
+          let x = BigInt(n);
+          if (x === BigInt(0)) return "0";
+          let out = "";
+          while (x > BigInt(0)) {
+            out = (x % BigInt(2) === BigInt(0) ? "0" : "1") + out;
+            x /= BigInt(2);
+          }
+          return out;
+        }
+
+        function toBin(n) {
+          let x = BigInt(n);
+          if (x === BigInt(0)) return "0";
+          const base = bigIntPow(2, 30);
+          const chunks = [];
+          while (x > BigInt(0)) { chunks.push(x % base); x /= base; }
+          chunks.reverse();
+          let out = toBinSmall(chunks[0]);
+          for (let i = 1; i < chunks.length; i++) {
+            out += toBinSmall(chunks[i]).padStart(30, "0");
+          }
+          return out;
+        }
+
+        function binTail(n) {
+          const b = toBin(BigInt(n));
+          return b.length <= 1 ? "" : b.slice(1);
+        }
+
+        function parseBase2(s) {
+          let res = BigInt(0);
+          for (let ch of s) {
+            res = res * BigInt(2) + (ch === "1" ? BigInt(1) : BigInt(0));
+          }
+          return res;
+        }
+
+        class DeterministicRng32 {
+          constructor(seedValue = BigInt(1)) {
+            this.n = 624;
+            this.m = 397;
+            this.matrixA = BigInt(0x9908b0df);
+            this.upperMask = BigInt(0x80000000);
+            this.lowerMask = BigInt(0x7fffffff);
+            this.mt = new Array(this.n).fill(BigInt(0));
+            this.mti = this.n + 1;
+            this.setSeed(seedValue);
+          }
+
+          setSeed(seedValue) {
+            let x = BigInt(seedValue);
+            if (x < BigInt(0)) x = -x;
+            const key = [];
+            const base = BigInt(4294967296);
+            while (x > BigInt(0)) { key.push(x % base); x /= base; }
+            if (!key.length) key.push(BigInt(0));
+            this.initByArray(key);
+          }
+
+          initGenrand(s) {
+            const mask = BigInt(0xFFFFFFFF);
+            this.mt[0] = BigInt(s) & mask;
+            for (let i = 1; i < this.n; i++) {
+              const prev = this.mt[i - 1];
+              const v = prev ^ (prev >> BigInt(30));
+              this.mt[i] = (BigInt(1812433253) * v + BigInt(i)) & mask;
+            }
+            this.mti = this.n;
+          }
+
+          initByArray(initKey) {
+            const mask = BigInt(0xFFFFFFFF);
+            this.initGenrand(BigInt(19650218));
+            let i = 1, j = 0;
+            const keyLength = initKey.length;
+            for (let k = Math.max(this.n, keyLength); k > 0; k--) {
+              const v = this.mt[i - 1] ^ (this.mt[i - 1] >> BigInt(30));
+              this.mt[i] = ((this.mt[i] ^ (v * BigInt(1664525))) + initKey[j] + BigInt(j)) & mask;
+              i++; j++;
+              if (i >= this.n) { this.mt[0] = this.mt[this.n - 1]; i = 1; }
+              if (j >= keyLength) j = 0;
+            }
+            for (let k = this.n - 1; k > 0; k--) {
+              const v = this.mt[i - 1] ^ (this.mt[i - 1] >> BigInt(30));
+              this.mt[i] = ((this.mt[i] ^ (v * BigInt(1566083941))) - BigInt(i)) & mask;
+              i++;
+              if (i >= this.n) { this.mt[0] = this.mt[this.n - 1]; i = 1; }
+            }
+            this.mt[0] = BigInt(0x80000000);
+            this.mti = this.n;
+          }
+
+          nextU32() {
+            const mask = BigInt(0xFFFFFFFF);
+            if (this.mti >= this.n) {
+              for (let kk = 0; kk < this.n - this.m; kk++) {
+                const y = (this.mt[kk] & this.upperMask) | (this.mt[kk + 1] & this.lowerMask);
+                const twist = (y % BigInt(2) !== BigInt(0)) ? this.matrixA : BigInt(0);
+                this.mt[kk] = (this.mt[kk + this.m] ^ (y >> BigInt(1)) ^ twist) & mask;
+              }
+              for (let kk = this.n - this.m; kk < this.n - 1; kk++) {
+                const y = (this.mt[kk] & this.upperMask) | (this.mt[kk + 1] & this.lowerMask);
+                const twist = (y % BigInt(2) !== BigInt(0)) ? this.matrixA : BigInt(0);
+                this.mt[kk] = (this.mt[kk + (this.m - this.n)] ^ (y >> BigInt(1)) ^ twist) & mask;
+              }
+              const yLast = (this.mt[this.n - 1] & this.upperMask) | (this.mt[0] & this.lowerMask);
+              const twistLast = (yLast % BigInt(2) !== BigInt(0)) ? this.matrixA : BigInt(0);
+              this.mt[this.n - 1] = (this.mt[this.m - 1] ^ (yLast >> BigInt(1)) ^ twistLast) & mask;
+              this.mti = 0;
+            }
+            let y = this.mt[this.mti++];
+            y ^= (y >> BigInt(11));
+            y ^= (y << BigInt(7)) & BigInt(0x9d2c5680);
+            y ^= (y << BigInt(15)) & BigInt(0xefc60000);
+            y ^= (y >> BigInt(18));
+            return y & mask;
+          }
+
+          getRandBits(k) {
+            if (k <= 0) return BigInt(0);
+            const words = Math.floor((k + 31) / 32);
+            let x = BigInt(0);
+            const base = BigInt(4294967296);
+            for (let i = 0; i < words; i++) x = x * base + this.nextU32();
+            const extra = words * 32 - k;
+            if (extra) x /= bigIntPow(2, extra);
+            return x;
+          }
+
+          randBelow(n) {
+            const k = BigInt(n).toString(2).length;
+            while (true) {
+              const r = this.getRandBits(k);
+              if (r < BigInt(n)) return r;
+            }
+          }
+
+          randint(a, b) {
+            return BigInt(a) + this.randBelow(BigInt(b) - BigInt(a) + BigInt(1));
+          }
+        }
+
+        function fastAnyBaseList(val, b) {
+          let v = BigInt(val);
+          const bN = BigInt(b);
+          if (v === BigInt(0)) return ["0"];
+          const powers = [[1, bN]];
+          while (powers[powers.length - 1][1] <= v) {
+            const last = powers[powers.length - 1];
+            powers.push([last[0] * 2, last[1] * last[1]]);
+          }
+          let n = 0;
+          let curBn = BigInt(1);
+          for (let i = powers.length - 1; i >= 0; i--) {
+            const [pN, pVal] = powers[i];
+            if (curBn * pVal <= v) { curBn *= pVal; n += pN; }
+          }
+          n += 1;
+          function convert(v, targetLen) {
+            if (targetLen <= 500) {
+              const out = [];
+              for (let i = 0; i < targetLen; i++) { out.push(String(v % bN)); v /= bN; }
+              return out.reverse();
+            }
+            const half = Math.floor(targetLen / 2);
+            const divisor = bigIntPow(bN, half);
+            return convert(v / divisor, targetLen - half).concat(convert(v % divisor, half));
+          }
+          const res = convert(v, n);
+          while (res.length > 1 && res[0] === "0") res.shift();
+          return res;
+        }
+
+        function fromAnyBase(n, b) {
+          const bN = BigInt(b);
+          const parts = Array.isArray(n) ? n : splitWs(n);
+          if (!parts.length) return BigInt(0);
+          const ints = parts.map(p => BigInt(p));
+          function evalRange(start, end) {
+            if (end - start <= 200) {
+              let res = BigInt(0);
+              for (let i = start; i < end; i++) res = res * bN + ints[i];
+              return res;
+            }
+            const mid = Math.floor((start + end) / 2);
+            return evalRange(start, mid) * bigIntPow(bN, end - mid) + evalRange(mid, end);
+          }
+          return evalRange(0, ints.length);
+        }
+
+        function fastBaseConvert(val, b, padTo, charset) {
+          const bN = BigInt(b);
+          if (padTo <= 500) {
+            const out = [];
+            let v = BigInt(val);
+            for (let i = 0; i < padTo; i++) { out.push(charset[Number(v % bN)]); v /= bN; }
+            return out.reverse().join("");
+          }
+          const half = Math.floor(padTo / 2);
+          const divisor = bigIntPow(bN, half);
+          return fastBaseConvert(val / divisor, b, padTo - half, charset) + fastBaseConvert(val % divisor, b, half, charset);
+        }
+
+        function fDecimal(d, b) {
+          const dN = BigInt(d);
+          const bN = BigInt(b);
+          const c = gChar(b);
+          if (b === 1) return c[0].repeat(Number(dN + BigInt(1)));
+          const target = dN * (bN - BigInt(1)) + bN;
+          const powers = [[1, bN]];
+          while (powers[powers.length - 1][1] <= target) {
+            const last = powers[powers.length - 1];
+            powers.push([last[0] * 2, last[1] * last[1]]);
+          }
+          let n = 0;
+          let curBn = BigInt(1);
+          for (let i = powers.length - 1; i >= 0; i--) {
+            const [pN, pVal] = powers[i];
+            if (curBn * pVal <= target) { curBn *= pVal; n += pN; }
+          }
+          const geomSum = n > 0 ? (bigIntPow(bN, n) - bN) / (bN - BigInt(1)) : BigInt(0);
+          const r = dN - geomSum;
+          return n === 0 ? "" : fastBaseConvert(r, b, n, c);
+        }
+
+        function tDecimal(c, b) {
+          const s = String(c), l = s.length, bN = BigInt(b);
+          if (b === 10) return parseDec(s) + (l > 1 ? (bigIntPow(10, l) - BigInt(10)) / BigInt(9) : BigInt(0));
+          if (b === 16) return parseHex(s) + (l > 1 ? (bigIntPow(16, l) - BigInt(16)) / BigInt(15) : BigInt(0));
+          if (!tDecCache.has(b)) tDecCache.set(b, Object.fromEntries(gChar(b).split('').map((ch, i) => [ch, BigInt(i)])));
+          const charMap = tDecCache.get(b);
+          function evalRange(start, end) {
+            if (end - start <= 200) {
+              let res = BigInt(0);
+              for (let i = start; i < end; i++) res = res * bN + charMap[s[i]];
+              return res;
+            }
+            const mid = Math.floor((start + end) / 2);
+            return evalRange(start, mid) * bigIntPow(bN, end - mid) + evalRange(mid, end);
+          }
+          const v = evalRange(0, l);
+          const geomSum = (b > 1 && l > 1) ? (bigIntPow(bN, l) - bN) / (bN - BigInt(1)) : (l > 1 && b === 1 ? BigInt(l - 1) : BigInt(0));
+          return v + geomSum;
+        }
+
+        function generateSeries(s, n) {
+          const r = new DeterministicRng32(BigInt(s));
+          let out = "";
+          for (let i = 0; i < n; i++) out += String(r.randint(0, 8));
+          return out;
+        }
+
+        function manipulateData(s, c) {
+          const sStr = String(s);
+          const k = generateSeries(c, sStr.length);
+          let out = "";
+          for (let i = 0; i < sStr.length; i++) {
+            const val = (sStr.charCodeAt(i) + k.charCodeAt(i) - 96) % 10;
+            out += String.fromCharCode(val + 48);
+          }
+          return out;
+        }
+
+        function qRotate(s) { return s.slice(5) + s.slice(2, 5).split("").reverse().join("") + s.slice(0, 2); }
+        function pRotate(s) { return s.slice(-2) + s.slice(-5, -2).split("").reverse().join("") + s.slice(0, -5); }
+
+        function bSplit(s, f = 4) {
+          const bStr = binTail(s), l = bStr.length, rem = l % f;
+          const parts = ["1"];
+          for (let i = 0; i < l - rem; i += f) parts.push(bStr.slice(i, i + f).split("").reverse().join(""));
+          if (rem) parts.push(bStr.slice(l - rem));
+          return parseBase2(parts.join(""));
+        }
+
+        function kSplit(s, k) {
+          const sBin = binTail(s), kStr = String(k).replace(/0/g, "");
+          if (!kStr) return parseBase2("1" + sBin.split("").reverse().join(""));
+          const kDigits = kStr.split("").map(d => parseInt(d) + 1);
+          const kLen = kDigits.length, sLen = sBin.length;
+          let chunks = [], idx = 0, kIdx = 0;
+          while (idx < sLen) {
+            const step = kDigits[kIdx % kLen];
+            chunks.push(sBin.slice(idx, idx + step).split("").reverse().join(""));
+            idx += step; kIdx++;
+          }
+          return parseBase2("1" + chunks.join(""));
+        }
+
+        function baseSplit(n, k, b = 8, y = 1) {
+          const bN = BigInt(b), m = 65536;
+          let nDigits = fastAnyBaseList(n, b);
+          let z = fastAnyBaseList(k, m).filter(x => x.length >= 2 && x.length <= 10);
+          if (!z.length) z = [String(Number(BigInt(k) % BigInt(m - 2)) + 2)];
+          const targetLen = (y === 1) ? nDigits.length + 1 : nDigits.length;
+          let loops = 0;
+          while (z.length < targetLen) {
+            const nextK = BigInt(z[z.length - 1]) + BigInt(m);
+            z.push(...fastAnyBaseList(nextK, m).filter(x => x.length >= 2 && x.length <= 10));
+            if (++loops > 1000) break;
+          }
+          if (z.length < targetLen) z.push(...new Array(targetLen - z.length).fill(z[z.length - 1]));
+          if (y === 1) {
+            const guard = pyMod(BigInt(1) - (BigInt(z[0]) % bN), bN);
+            nDigits = [String(guard)].concat(nDigits);
+            return fromAnyBase(nDigits.map((x, i) => String(pyMod(BigInt(x) + BigInt(z[i]), bN))), b);
+          }
+          const outDigits = nDigits.map((x, i) => String(pyMod(BigInt(x) - BigInt(z[i]), bN)));
+          return outDigits.length <= 1 ? BigInt(0) : fromAnyBase(outDigits.slice(1), b);
+        }
+
+        function Ap(n, m, p) { return (BigInt(n) * BigInt(m)).toString().slice(0, p); }
+        function Bp(n, p) {
+          const n0 = n.charCodeAt(0) - 48;
+          let out = "";
+          for (let i = 0; i < p; i++) out += String((n.charCodeAt(i % n.length) - 48 + n0) % 10);
+          return out;
+        }
+        function Cp(n, m, p) { return (BigInt(n) * BigInt(n.slice(0, 3 % n.length))).toString().slice(0, p); }
+        function Dp(n, m, p) {
+          let out = "";
+          for (let i = 0; i < p; i++) out += Math.abs((n.charCodeAt(i % n.length) - 48) * (m.charCodeAt(i % m.length) - 48));
+          return out.slice(0, p);
+        }
+
+        function Ep(n, p) {
+          let total = BigInt(0);
+          const ln = n.length;
+          for (let i = 0; i < p; i++) {
+            const a = (n.charCodeAt(i % ln) - 48) + 1;
+            const b = (n.charCodeAt((i + 1) % ln) - 48) + 1;
+            const v = PI * (1 / a / b);
+            const frac = v - Math.floor(v);
+            let sFrac = String(frac);
+            if (sFrac === "0") sFrac = "0.0";
+            else if (!sFrac.includes('.')) sFrac = sFrac + ".0";
+            const token = sFrac.slice(2);
+            total += token ? BigInt(token) : BigInt(0);
+          }
+          return total.toString().slice(-p);
+        }
+
+        function processKey(n, m = 0) {
+          let ns = String(n), ms = m ? String(m) : String(n);
+          const p = ns.length, r = parseInt(ns[0]);
+          const tIdx = (ms.length > r) ? parseInt(ms[r]) % p : p - 1;
+          const t = parseInt(ns[tIdx]);
+          const a = (r + t) % 6, b = pyMod(r - t, 6);
+          let res = (a === 0) ? Ap(ns, ms, p) : (a === 1) ? Bp(ns, p) : (a === 2) ? Cp(ns, ms, p) : (a === 3) ? Dp(ns, ms, p) : (a === 4) ? Ep(ns, p) : Ap(Bp(Cp(Dp(Ep(ns, p), ms, p), ms, p), p), ms, p);
+          res = (Number(b) === 0) ? Cp(res, ms, p) : (Number(b) === 1) ? Dp(res, ms, p) : (Number(b) === 2) ? Ap(Bp(Cp(Dp(Ep(res, p), ms, p), ms, p), p), ms, p) : (Number(b) === 3) ? Bp(res, p) : (Number(b) === 4) ? Ap(res, ms, p) : Ap(Bp(Cp(Dp(Ep(res, p), ms, p), ms, p), p), ms, p);
+          const a2 = res.split("").find(x => x !== "0" && !isNaN(x)) || "2";
+          const b2 = res.slice(1).split("").find(x => x !== "0" && !isNaN(x)) || "3";
+          let folded = String(bSplit(bSplit(BigInt(res) + BigInt(pRotate(res)))));
+          let finalNum = tDecimal(qRotate(folded), 10) + BigInt(a2 + b2 + "0".repeat(p - 2));
+          return (finalNum + BigInt(ms)).toString().slice(-p);
+        }
+
+        function checkData(n, i) {
+          let nv = BigInt(n), iv = BigInt(i);
+          while (nv < ten79) { nv *= BigInt(3); nv += iv; iv += iv; }
+          const s = nv.toString();
+          let acc = BigInt(0);
+          for (let j = 0; j < s.length; j += 80) acc += parseDec(s.slice(j, j + 80));
+          return kSplit(BigInt(qRotate(String(bSplit(acc))) + processKey(acc)), acc);
+        }
+
+        function getKey(n, x = 78) {
+          let nv = BigInt(n);
+          while (true) {
+            nv = (nv / BigInt(8)) + BigInt(Ep((nv / BigInt(5)).toString(), nv.toString().length));
+            if (nv.toString().length <= x) return nv.toString();
+          }
+        }
+
+        function fold64(h) {
+          let s = String(h).toLowerCase().replace(/[^0-9a-f]/g, "");
+          if (!s) return "0".repeat(64);
+          if (s.length < 64) {
+            return s.repeat(Math.floor(64 / s.length) + 1);
+          }
+          const out = new Array(64).fill(0);
+          for (let i = 0; i < s.length; i++) out[i % 64] ^= parseInt(s[i], 16);
+          return out.map((x) => digits16[x]).join("");
+        }
+
+        function getE(hex64) {
+          const x = hex64.toLowerCase().padStart(64, '0').slice(-64);
+          const s4 = (parseHex(x.slice(0, 4)) + parseHex(x.slice(-4))).toString().replace(/^0+/, "") || "0";
+          const s4f = s4.slice(0, 4);
+          const n = Number(parseDec(s4f));
+          if (n < 4096) return n;
+          if (n % 2 === 0) return Number(parseDec(s4f.slice(0, -1) || "0")) + (s4f.length > 1 && s4f[s4f.length - 2] === '0' ? 100 : 0);
+          return Number(parseDec(s4f.slice(1) || "0")) + (s4f.length > 1 && s4f[1] === '0' ? 100 : 0);
+        }
+
+        function toBytes(t) {
+          const s = String(t);
+          let v = BigInt(0);
+          v = (v << BigInt(8)) | BigInt(1);
+          for (let i = 0; i < s.length; i++) {
+            const cu = s.charCodeAt(i);
+            v = (v << BigInt(8)) | BigInt(cu & 255);
+            v = (v << BigInt(8)) | BigInt((cu >> 8) & 255);
+          }
+          return v;
+        }
+
+        function hashKey(n) {
+          const nBytes = toBytes(n);
+          const cd = checkData(nBytes + BigInt(90), (nBytes % BigInt(7)) + BigInt(1));
+          const gk = getKey(BigInt(cd), 79);
+          const md = manipulateData(gk, nBytes);
+          const tk = tDecimal(md, 10);
+          const manipulated = fDecimal(tDecimal(hexLower(tk), 16) + parseHex(fDecimal(tk, 16)), 16).slice(-63, -1);
+          const h = fold64(manipulated);
+          const f = parseHex(h.slice(0, 4)), l = parseHex(h.slice(-4));
+          const seedVal = Number((((f >> BigInt(8)) ^ (l & BigInt(255)) ^ (f & BigInt(255)) ^ (l >> BigInt(8))) & BigInt(255)));
+          let mh = "";
+          for (let i = 0; i < 64; i += 2) {
+            const byte = pyMod(parseHex(h.slice(i, i + 2)) - BigInt(seedVal), 256);
+            mh += digits16[Number(byte / BigInt(16))] + digits16[Number(byte % BigInt(16))];
+          }
+          const mhVal = hexLower(parseHex(mh) + parseHex(h));
+          const baseParam = parseHex(mhVal.slice(0, 4).padStart(4, "0"));
+          const splitVal = baseSplit(parseHex(mhVal), parseHex(mhVal.slice(-4).padStart(4, "0")), Number((baseParam & BigInt(4096)) + BigInt(64)), 1);
+          const sFull = hexLower(parseHex(h) + parseHex(hexLower(splitVal)));
+          const finalH = fold64(sFull);
+          return [finalH, getE(finalH)];
+        }
+
+        /**
+         * INITIAL STATE GENERATOR
+         */
+        const generateRandomSHEPInput = () => {
+          let res = BigInt(1) << BigInt(256); 
+          for (let i = 0; i < 256; i++) {
+            if (Math.random() > 0.5) {
+              res |= (BigInt(1) << BigInt(i));
+            }
+          }
+          return res.toString();
+        };
+
+        /**
+         * BENCHMARK & SCORING ALGORITHMS
+         */
+        const _L1MAX = 1.875;
+        
+        function initMatrix() {
+            return { N: 0, pos: Array.from({length: 64}, () => new Array(16).fill(0)), gc: new Array(16).fill(0) };
+        }
+        
+        function pushHex(mx, hx) {
+            mx.N++;
+            for (let i = 0; i < 64; i++) {
+                const v = parseInt(hx[i], 16);
+                if(!isNaN(v)) {
+                    mx.pos[i][v]++;
+                    mx.gc[v]++;
+                }
+            }
+        }
+
+        function posUniform(mx) {
+            const N = mx.N;
+            if (N <= 0) return 0.0;
+            const u = 1.0 / 16.0;
+            let tot = 0.0;
+            for (let p = 0; p < 64; p++) {
+                let l1 = 0.0;
+                for (let c of mx.pos[p]) l1 += Math.abs((c / N) - u);
+                tot += (1.0 - (l1 / _L1MAX));
+            }
+            return Math.max(0.0, Math.min(1.0, tot / 64.0));
+        }
+
+        function globalUniform(mx) {
+            const N = mx.N;
+            if (N <= 0) return 0.0;
+            const total = 64.0 * N;
+            const u = 1.0 / 16.0;
+            let l1 = 0.0;
+            for (let c of mx.gc) l1 += Math.abs((c / total) - u);
+            return Math.max(0.0, Math.min(1.0, 1.0 - (l1 / _L1MAX)));
+        }
+
+        function hexToBits(h) {
+            const bits = [];
+            for (let ch of (h||"").toLowerCase()) {
+                const v = parseInt(ch, 16);
+                if (!isNaN(v)) {
+                    bits.push((v >> 3) & 1, (v >> 2) & 1, (v >> 1) & 1, v & 1);
+                }
+            }
+            return bits;
+        }
+
+        function shannonEntropyBit(p1) {
+            if (p1 <= 0.0 || p1 >= 1.0) return 0.0;
+            const p0 = 1.0 - p1;
+            return -(p0 * Math.log2(p0) + p1 * Math.log2(p1));
+        }
+
+        function erfc(x) {
+            const t = 1.0 / (1.0 + 0.5 * Math.abs(x));
+            const ans = t * Math.exp(-x * x - 1.26551223 + t * (1.00002368 + t * (0.37409196 + t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))));
+            return x >= 0 ? ans : 2.0 - ans;
+        }
+
+        function runsTestP(bits) {
+            const n = bits.length;
+            if (n < 2) return 0.0;
+            const ones = bits.reduce((a, b) => a + b, 0);
+            const pi = ones / n;
+            if (Math.abs(pi - 0.5) >= 2.0 / Math.sqrt(n)) return 0.0;
+            let v = 1;
+            for (let i = 1; i < n; i++) if (bits[i] !== bits[i - 1]) v++;
+            const num = Math.abs(v - (2.0 * n * pi * (1.0 - pi)));
+            const den = 2.0 * Math.sqrt(2.0 * n) * pi * (1.0 - pi);
+            return den === 0 ? 0.0 : erfc(num / den);
+        }
+
+        function hamming(aBits, bBits) {
+            let count = 0;
+            const len = Math.min(aBits.length, bBits.length);
+            for (let i = 0; i < len; i++) if (aBits[i] !== bBits[i]) count++;
+            return count;
+        }
+
+        function keyStats(hexList) {
+            if (!hexList || !hexList.length) return [0, 0.0, 0.0, 0.0, 0.0];
+            const perBits = hexList.map(hexToBits).filter(b => b.length > 0);
+            if (!perBits.length) return [0, 0.0, 0.0, 0.0, 0.0];
+            const bitLen = perBits[0].length;
+            const allBits = [];
+            for (const b of perBits) allBits.push(...b);
+            
+            const n = allBits.length;
+            const ones = allBits.reduce((a, b) => a + b, 0);
+            const onesPct = n ? (ones * 100.0 / n) : 0.0;
+            const ent = shannonEntropyBit(n ? (ones / n) : 0.0);
+            const runsP = runsTestP(allBits);
+            
+            let avgHam = 0.0;
+            if (perBits.length >= 2) {
+                let hs = 0, c = 0;
+                for (let i = 1; i < perBits.length; i++) {
+                    hs += hamming(perBits[i - 1], perBits[i]);
+                    c++;
+                }
+                avgHam = c ? (hs / c) : 0.0;
+            }
+            return [bitLen, onesPct, ent, runsP, avgHam];
+        }
+
+        function bitAbsScore(bitLen, onesPct, ent, runsP, avgHam) {
+            if (bitLen <= 0) return 0.0;
+            const biasN = Math.pow((onesPct - 50.0) / 50.0, 2);
+            const entN = Math.pow((1.0 - Math.max(0.0, Math.min(1.0, ent))), 2);
+            const hamFrac = (avgHam / bitLen) || 0.0;
+            const hamN = Math.pow((hamFrac - 0.5) / 0.5, 2);
+            const rp = Math.max(0.0, Math.min(1.0, runsP));
+            const runN = Math.pow((rp - 0.5) / 0.5, 2);
+            const wBias = 0.18, wEnt = 0.18, wHam = 0.44, wRun = 0.20;
+            const bad = (wBias * biasN) + (wEnt * entN) + (wHam * hamN) + (wRun * runN);
+            return 100.0 * Math.max(0.0, Math.min(1.0, 1.0 - bad));
+        }
+
+        function matrixAbsScore(posU, globU) {
+            return 100.0 * (0.85 * posU + 0.15 * globU);
+        }
+
+        function clamp(x, lo, hi) { return x < lo ? lo : (x > hi ? hi : x); }
+
+        function fairPairScores(absA, absB) {
+            const bandA = 90.0 + 9.0 * (absA / 100.0);
+            const bandB = 90.0 + 9.0 * (absB / 100.0);
+            const base = 0.5 * (bandA + bandB);
+            const d = absA - absB;
+            const delta = 2.25 * Math.tanh(d / 10.0);
+            return [clamp(base + delta, 90.0, 99.5), clamp(base - delta, 90.0, 99.5)];
+        }
+
+        // --- Optimized Generation Logic ---
+        function canUtf16(cp) {
+            try { String.fromCodePoint(cp); return true; } catch (e) { return false; }
+        }
+
+        const _catsCache = {};
+        function makePool(cat) {
+            if (_catsCache[cat]) return _catsCache[cat];
+            let pool = [];
+            if (cat === "a-z") { for(let i=97; i<=122; i++) pool.push(String.fromCharCode(i)); }
+            else if (cat === "A-Z") { for(let i=65; i<=90; i++) pool.push(String.fromCharCode(i)); }
+            else if (cat === "A-Za-z") { pool = makePool("a-z").concat(makePool("A-Z")); }
+            else if (cat === "0-9") { for(let i=48; i<=57; i++) pool.push(String.fromCharCode(i)); }
+            else if (cat === "a-zA-Z0-9") { pool = makePool("A-Za-z").concat(makePool("0-9")); }
+            else if (cat === "a-zA-Z0-9 ") { pool = makePool("a-zA-Z0-9").concat([" "]); }
+            _catsCache[cat] = pool;
+            return pool;
+        }
+
+        const uniSteps = [100, 500, 1000, 2000, 5000, 10000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000, 100000, 200000, 300000, 400000, 500000];
+        const catConfigs = [
+            {name: "a-z", val: 0}, {name: "A-Z", val: 0}, {name: "A-Za-z", val: 0}, 
+            {name: "0-9", val: 0}, {name: "a-zA-Z0-9", val: 0}, {name: "a-zA-Z0-9 ", val: 0}
+        ];
+        uniSteps.forEach(n => catConfigs.push({name: `unicode${n}`, val: n}));
+
+        function getRandCat() {
+            const idx = Math.floor(Math.random() * catConfigs.length);
+            return catConfigs[idx];
+        }
+
+        async function sha256(message) {
+            const msgUint8 = new TextEncoder().encode(message);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        function formatNum(num, digits=2) {
+            if(num === undefined || num === null || isNaN(num)) return "—";
+            return Number(num).toFixed(digits);
+        }
+
+        /**
+         * Reusable UI Component for Consolidated Scorecard Metrics
+         */
+        const MetricRow = ({ label, shepVal, shaVal, isFinal }) => (
+            <div className={`flex justify-between items-center py-3 border-b border-slate-800/50 last:border-0 ${isFinal ? 'bg-slate-900/40 rounded-lg px-2 mt-2 border-none' : ''}`}>
+                <span className={`w-1/3 text-xs md:text-sm font-mono uppercase tracking-tighter ${isFinal ? 'text-cyan-500 font-bold' : 'text-slate-400'}`}>{label}</span>
+                <span className={`w-1/3 text-center text-sm md:text-base font-bold font-mono ${isFinal ? 'text-white' : 'text-cyan-400'}`}>{shepVal}</span>
+                <span className={`w-1/3 text-right text-sm md:text-base font-bold font-mono ${isFinal ? 'text-white' : 'text-slate-300'}`}>{shaVal}</span>
+            </div>
+        );
+
+        /**
+         * REACT APP COMPONENT
+         */
+        const App = () => {
+          const [activeTab, setActiveTab] = useState('generator');
+          const [input, setInput] = useState(() => generateRandomSHEPInput());
+          const [result, setResult] = useState({ hash: '', value: 0 });
+          const [copied, setCopied] = useState(false);
+          const [isProcessing, setIsProcessing] = useState(false);
+          const [error, setError] = useState(null);
+
+          // Generator Logic
+          useEffect(() => {
+            if (activeTab !== 'generator') return;
+            const compute = () => {
+              if (!input) { setResult({ hash: '', value: 0 }); return; }
+              setIsProcessing(true); setError(null);
+              const timer = setTimeout(() => {
+                try {
+                  const [hash, value] = hashKey(input);
+                  setResult({ hash, value });
+                } catch (err) {
+                  setError(err.message);
+                } finally {
+                  setIsProcessing(false);
+                }
+              }, 40);
+              return () => clearTimeout(timer);
+            };
+            compute();
+          }, [input, activeTab]);
+
+          // Benchmark State
+          const [benchConfig, setBenchConfig] = useState({
+            iters: 50000,
+            mode: 1, 
+            startCp: 0
+          });
+          
+          const [benchStatus, setBenchStatus] = useState({
+            running: false,
+            current: 0,
+            betterTally: { shep: 0, sha: 0 },
+            history: [], 
+            shepAllHashes: [],
+            shaAllHashes: []
+          });
+
+          const abortRef = useRef(false);
+
+          const runBenchmark = async () => {
+            setBenchStatus(prev => ({ 
+                ...prev, running: true, current: 0, history: [], 
+                betterTally: { shep: 0, sha: 0 }, shepAllHashes: [], shaAllHashes: []
+            }));
+            abortRef.current = false;
+            
+            let shepMxAll = initMatrix();
+            let shaMxAll = initMatrix();
+            
+            let currentCp = benchConfig.startCp;
+            const endCp = 0x10FFFF;
+            const chunkLen = 32;
+
+            const CHUNK_SIZE = 100;
+            const total = Math.min(benchConfig.iters, 250000);
+
+            let shepHList = [];
+            let shaHList = [];
+            let newBetterTally = { shep: 0, sha: 0 };
+
+            for (let i = 0; i < total; i += CHUNK_SIZE) {
+              if (abortRef.current) break;
+              const end = Math.min(i + CHUNK_SIZE, total);
+              
+              let catName = "";
+              let lastLen = 0;
+              let shepOk = 0;
+              let shaOk = 0;
+
+              for (let j = i; j < end; j++) {
+                let s = "";
+                if (benchConfig.mode === 0) {
+                    const catObj = getRandCat();
+                    catName = catObj.name;
+                    const n = Math.floor(Math.random() * (100 - 5 + 1)) + 5;
+                    if (catName.startsWith("unicode")) {
+                        for(let k=0; k<n; k++) {
+                            let cp;
+                            do {
+                                cp = Math.floor(Math.random() * catObj.val);
+                            } while (cp >= 0xD800 && cp <= 0xDFFF);
+                            s += String.fromCodePoint(cp);
+                        }
+                    } else {
+                        const pool = makePool(catName);
+                        for(let k=0; k<n; k++) {
+                            s += pool[Math.floor(Math.random() * pool.length)];
+                        }
+                    }
+                } else if (benchConfig.mode === 1) {
+                    if (currentCp > endCp) break;
+                    let a = currentCp;
+                    let b = Math.min(endCp, currentCp + chunkLen - 1);
+                    for (let x = a; x <= b; x++) {
+                        if (!(x >= 0xD800 && x <= 0xDFFF)) s += String.fromCodePoint(x);
+                    }
+                    catName = `uSeq=${a}-${b},len=${chunkLen}`;
+                    currentCp = b + 1;
+                } else if (benchConfig.mode === 2) {
+                    if (currentCp > endCp) break;
+                    while (currentCp >= 0xD800 && currentCp <= 0xDFFF && currentCp <= endCp) currentCp++;
+                    if (currentCp > endCp) break;
+                    s = String.fromCodePoint(currentCp);
+                    catName = `progress=${currentCp}`;
+                    currentCp++;
+                }
+                
+                lastLen = s.length;
+                if (!s) continue;
+
+                const [shepH] = hashKey(s);
+                const shaH = await sha256(s);
+
+                shepHList.push(shepH);
+                shaHList.push(shaH);
+                
+                pushHex(shepMxAll, shepH); shepOk++;
+                pushHex(shaMxAll, shaH); shaOk++;
+              }
+
+              // Bit Stats processed against ALL hashes generated so far (mirroring the Python readLines behavior)
+              let [shepBitLen, shepOnesPct, shepEnt, shepRunsP, shepAvgHam] = keyStats(shepHList);
+              let [shaBitLen, shaOnesPct, shaEnt, shaRunsP, shaAvgHam] = keyStats(shaHList);
+              
+              let shepPosU = posUniform(shepMxAll);
+              let shepGlobU = globalUniform(shepMxAll);
+              let shaPosU = posUniform(shaMxAll);
+              let shaGlobU = globalUniform(shaMxAll);
+
+              let shepBitAbs = bitAbsScore(shepBitLen, shepOnesPct, shepEnt, shepRunsP, shepAvgHam);
+              let shepMatAbs = matrixAbsScore(shepPosU, shepGlobU);
+
+              let shaBitAbs = bitAbsScore(shaBitLen, shaOnesPct, shaEnt, shaRunsP, shaAvgHam);
+              let shaMatAbs = matrixAbsScore(shaPosU, shaGlobU);
+
+              let shepAbs = (0.55 * shepBitAbs) + (0.45 * shepMatAbs);
+              let shaAbs = (0.55 * shaBitAbs) + (0.45 * shaMatAbs);
+
+              let [shepFinal, shaFinal] = fairPairScores(shepAbs, shaAbs);
+              
+              let betterName = shepFinal > shaFinal ? "SHEP32" : (shaFinal > shepFinal ? "SHA256" : "TIE");
+              if(betterName === "SHEP32") newBetterTally.shep++;
+              else if(betterName === "SHA256") newBetterTally.sha++;
+
+              setBenchStatus(prev => ({
+                ...prev,
+                current: end,
+                betterTally: { ...newBetterTally },
+                history: [...prev.history, {
+                    iter: end, cat: catName, len: lastLen,
+                    shepOk, shaOk,
+                    shepOnes: shepOnesPct, shaOnes: shaOnesPct,
+                    shepEnt: shepEnt, shaEnt: shaEnt,
+                    shepRuns: shepRunsP, shaRuns: shaRunsP,
+                    shepHam: shepAvgHam, shaHam: shaAvgHam,
+                    shepPosU: shepPosU * 100, shaPosU: shaPosU * 100,
+                    shepGlobU: shepGlobU * 100, shaGlobU: shaGlobU * 100,
+                    shepAbs, shaAbs, 
+                    shepFinal, shaFinal, better: betterName
+                }],
+                shepAllHashes: shepHList,
+                shaAllHashes: shaHList
+              }));
+
+              await new Promise(r => setTimeout(r, 10)); // Yield to UI
+            }
+
+            setBenchStatus(prev => ({ ...prev, running: false }));
+          };
+
+          const downloadTextFile = (content, filename) => {
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+          };
+
+          const downloadCSV = () => {
+            if(!benchStatus.history.length) return;
+            const headers = "iter,category,len,shepOk,shaOk,shepOnes,shaOnes,shepEnt,shaEnt,shepRuns,shaRuns,shepHam,shaHam,shepPosU,shaPosU,shepGlobU,shaGlobU,shepAbs,shaAbs,shepFinal,shaFinal,better\n";
+            const rows = benchStatus.history.map(r => 
+                `${r.iter},${r.cat},${r.len},${r.shepOk},${r.shaOk},${formatNum(r.shepOnes)},${formatNum(r.shaOnes)},${formatNum(r.shepEnt,3)},${formatNum(r.shaEnt,3)},${formatNum(r.shepRuns,4)},${formatNum(r.shaRuns,4)},${formatNum(r.shepHam)},${formatNum(r.shaHam)},${formatNum(r.shepPosU)},${formatNum(r.shaPosU)},${formatNum(r.shepGlobU)},${formatNum(r.shaGlobU)},${formatNum(r.shepAbs)},${formatNum(r.shaAbs)},${formatNum(r.shepFinal)},${formatNum(r.shaFinal)},${r.better}`
+            ).join("\n");
+            
+            downloadTextFile(headers + rows, "SHEP32_Benchmark_Stats.csv");
+          };
+
+          const copyToClipboard = () => {
+            const el = document.createElement('textarea');
+            el.value = result.hash;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          };
+
+          const visibleHistory = benchStatus.history.slice(-10);
+          const paddingRows = Math.max(0, 10 - visibleHistory.length);
+          const latestStats = visibleHistory.length > 0 ? visibleHistory[visibleHistory.length - 1] : null;
+
+          return (
+            <div className="min-h-screen bg-slate-950 text-slate-200 font-sans p-4 md:p-8 flex flex-col items-center">
+              <div className="w-full max-w-6xl flex-grow">
+                
+                {/* Branding Header */}
+                <header className="mb-8 flex flex-col md:flex-row md:items-end gap-3 md:gap-6 border-b border-slate-800 pb-8">
+                  <div className="p-4 bg-cyan-500/10 rounded-2xl border border-cyan-500/20 shadow-lg shadow-cyan-500/5 mx-auto md:mx-0">
+                    <Shield className="w-10 h-10 text-cyan-400" />
+                  </div>
+                  <div className="flex-grow text-center md:text-left">
+                    <h1 className="text-4xl md:text-5xl font-black text-white tracking-tighter">SHEP-32</h1>
+                    <p className="text-cyan-500/60 font-mono text-xs md:text-sm uppercase tracking-[0.3em] mt-1">
+                      Series Hash Algorithm
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-2 items-center md:items-end">
+                    <div className="flex bg-slate-900 rounded-lg p-1 border border-slate-800">
+                      <button 
+                        onClick={() => setActiveTab('generator')}
+                        className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-2 ${activeTab === 'generator' ? 'bg-cyan-500 text-slate-950 shadow-lg' : 'text-slate-400 hover:text-white'}`}
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" /> GENERATOR
+                      </button>
+                      <button 
+                        onClick={() => setActiveTab('benchmark')}
+                        className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-2 ${activeTab === 'benchmark' ? 'bg-cyan-500 text-slate-950 shadow-lg' : 'text-slate-400 hover:text-white'}`}
+                      >
+                        <BarChart3 className="w-3.5 h-3.5" /> BENCHMARKS
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-4 bg-slate-900/40 p-2 rounded-lg border border-slate-800/50">
+                      <div className="text-right hidden sm:block">
+                        <p className="text-[10px] text-slate-500 font-mono leading-none">VERSION</p>
+                        <p className="text-xs text-slate-400 font-mono uppercase tracking-tighter">0.6.0-standalone</p>
+                      </div>
+                      <div className="h-8 w-px bg-slate-800 hidden sm:block" />
+                      <div className="flex flex-col items-center">
+                        <div className={`w-2 h-2 rounded-full ${isProcessing || benchStatus.running ? 'bg-amber-500 animate-pulse' : 'bg-green-500'}`} />
+                        <span className="text-[10px] text-slate-500 mt-1 font-mono uppercase tracking-tighter">
+                          {isProcessing || benchStatus.running ? 'Active' : 'Standby'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </header>
+
+                <main className="space-y-8 min-h-[500px]">
+                  {activeTab === 'generator' ? (
+                    <>
+                      <section className="bg-slate-900/50 border border-slate-800 rounded-2xl p-4 md:p-6 backdrop-blur-md shadow-2xl relative group">
+                        <div className="absolute -top-3 left-6 px-3 py-1 bg-slate-950 border border-slate-800 rounded-md text-[10px] font-mono text-slate-400 uppercase tracking-widest">
+                          Input Buffer
+                        </div>
+                        <label className="flex text-xs font-bold text-slate-500 mb-4 items-center justify-between">
+                          <span className="flex items-center gap-2">
+                            <Terminal className="w-4 h-4 text-cyan-500" />
+                            HASH INPUT DATA
+                          </span>
+                          <button 
+                            onClick={() => setInput(generateRandomSHEPInput())}
+                            className="hover:text-cyan-400 transition-colors flex items-center gap-1 group-hover:opacity-100"
+                          >
+                            <RefreshCw className={`w-3 h-3 ${isProcessing ? 'animate-spin' : ''}`} />
+                            RANDOMIZE
+                          </button>
+                        </label>
+                        <textarea
+                          className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-4 text-sm md:text-lg font-mono text-cyan-100/80 focus:ring-2 focus:ring-cyan-500/30 focus:border-cyan-500/50 outline-none transition-all resize-none h-40 shadow-inner"
+                          value={input}
+                          onChange={(e) => setInput(e.target.value)}
+                          placeholder="Paste data for transformation..."
+                          spellCheck="false"
+                        />
+                      </section>
+
+                      <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="md:col-span-2 bg-slate-900/50 border border-slate-800 rounded-2xl p-4 md:p-6 shadow-xl relative overflow-hidden group">
+                          <div className="absolute top-0 right-0 p-1 opacity-10 group-hover:opacity-20 transition-opacity">
+                            <Cpu className="w-24 h-24 -mr-6 -mt-6" />
+                          </div>
+                          <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-[10px] md:text-xs font-bold text-slate-500 flex items-center gap-2 uppercase tracking-widest">Series Signature</h3>
+                            <button 
+                              onClick={copyToClipboard}
+                              disabled={!result.hash}
+                              className="px-3 py-1.5 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 rounded-lg text-xs font-bold border border-cyan-500/20 transition-all flex items-center gap-2"
+                            >
+                              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} {copied ? 'COPIED' : 'COPY HASH'}
+                            </button>
+                          </div>
+                          <div className="bg-slate-950 p-4 md:p-6 rounded-xl border border-slate-800 break-all font-mono text-cyan-400 text-sm md:text-lg leading-relaxed shadow-inner min-h-[120px] flex items-center">
+                            {error ? <span className="text-red-400">{error}</span> : result.hash || "0x..."}
+                          </div>
+                        </div>
+
+                        <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-4 md:p-6 flex flex-col items-center justify-center text-center shadow-xl">
+                          <h3 className="text-[10px] font-bold text-slate-500 mb-6 uppercase tracking-[0.2em]">Control Value (E)</h3>
+                          <div className="bg-slate-950 w-full p-4 md:p-6 rounded-2xl border border-slate-800 shadow-inner flex items-center justify-center">
+                            <div className="text-4xl md:text-5xl font-black text-white tracking-tighter">{error ? "—" : result.value}</div>
+                          </div>
+                        </div>
+                      </section>
+                    </>
+                  ) : (
+                    <section className="space-y-6">
+                      
+                      {/* 1. Benchmark Controls First */}
+                      <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 items-end">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-500 uppercase">Iterations (Max 250k)</label>
+                          <input 
+                            type="number" 
+                            max="250000"
+                            value={benchConfig.iters}
+                            onChange={e => setBenchConfig(prev => ({...prev, iters: parseInt(e.target.value)}))}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm font-mono text-cyan-400 outline-none focus:border-cyan-500"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-500 uppercase">Generation Mode</label>
+                          <select 
+                            value={benchConfig.mode}
+                            onChange={e => setBenchConfig(prev => ({...prev, mode: parseInt(e.target.value)}))}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm font-mono text-cyan-400 outline-none focus:border-cyan-500"
+                          >
+                            <option value={0}>Random String (Mixed/Unicode)</option>
+                            <option value={1}>Sequential Chunk (Length 32)</option>
+                            <option value={2}>Sequential Single CodePoint</option>
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-500 uppercase">Start CP Value</label>
+                          <input 
+                            type="number" 
+                            value={benchConfig.startCp}
+                            onChange={e => setBenchConfig(prev => ({...prev, startCp: parseInt(e.target.value)}))}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm font-mono text-cyan-400 outline-none focus:border-cyan-500"
+                          />
+                        </div>
+                        <div className="flex gap-2">
+                          {!benchStatus.running ? (
+                            <button 
+                              onClick={runBenchmark}
+                              className="flex-grow bg-cyan-500 text-slate-950 font-bold py-2 rounded-lg text-xs flex items-center justify-center gap-2 hover:bg-cyan-400 transition-all"
+                            >
+                              <Play className="w-4 h-4 fill-current" /> START SUITE
+                            </button>
+                          ) : (
+                            <button 
+                              onClick={() => abortRef.current = true}
+                              className="flex-grow bg-red-500 text-white font-bold py-2 rounded-lg text-xs flex items-center justify-center gap-2 hover:bg-red-400 transition-all"
+                            >
+                              <Square className="w-4 h-4 fill-current" /> STOP
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* 2. Progress bar Second */}
+                      <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6">
+                        <div className="flex justify-between items-center mb-4">
+                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                            Audit Progress 
+                          </span>
+                          <span className="text-xs font-mono text-cyan-400">{benchStatus.current} / {benchConfig.iters}</span>
+                        </div>
+                        <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                          <div 
+                            className="h-full bg-cyan-500 transition-all duration-300 shadow-[0_0_10px_rgba(6,182,212,0.5)]" 
+                            style={{ width: `${(benchStatus.current / benchConfig.iters) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* 3. Single Consolidated Metrics Box Third */}
+                      <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                        <div className="flex justify-between items-center mb-4 border-b border-slate-800 pb-3">
+                            <h3 className="text-[10px] md:text-xs font-bold text-slate-500 uppercase tracking-[0.2em] w-1/3">EVALUATION METRICS</h3>
+                            <h3 className="text-[10px] md:text-xs font-bold text-cyan-500 uppercase tracking-[0.2em] w-1/3 text-center flex justify-center items-center gap-2">
+                                <Shield className="w-3.5 h-3.5 hidden sm:block"/> SHEP-32
+                            </h3>
+                            <h3 className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-[0.2em] w-1/3 text-right flex justify-end items-center gap-2">
+                                <Binary className="w-3.5 h-3.5 hidden sm:block"/> SHA-256
+                            </h3>
+                        </div>
+                        <div className="flex flex-col">
+                            <MetricRow 
+                                label="Ones Percentage" 
+                                shepVal={latestStats ? formatNum(latestStats.shepOnes, 2) + '%' : '—'} 
+                                shaVal={latestStats ? formatNum(latestStats.shaOnes, 2) + '%' : '—'} 
+                            />
+                            <MetricRow 
+                                label="Positional Uniformity" 
+                                shepVal={latestStats ? formatNum(latestStats.shepPosU, 2) + '%' : '—'} 
+                                shaVal={latestStats ? formatNum(latestStats.shaPosU, 2) + '%' : '—'} 
+                            />
+                            <MetricRow 
+                                label="Global Uniformity" 
+                                shepVal={latestStats ? formatNum(latestStats.shepGlobU, 2) + '%' : '—'} 
+                                shaVal={latestStats ? formatNum(latestStats.shaGlobU, 2) + '%' : '—'} 
+                            />
+                            <MetricRow 
+                                label="Avg Hamming Dist" 
+                                shepVal={latestStats ? formatNum(latestStats.shepHam, 2) : '—'} 
+                                shaVal={latestStats ? formatNum(latestStats.shaHam, 2) : '—'} 
+                            />
+                            <MetricRow 
+                                label="Shannon Entropy" 
+                                shepVal={latestStats ? formatNum(latestStats.shepEnt, 4) : '—'} 
+                                shaVal={latestStats ? formatNum(latestStats.shaEnt, 4) : '—'} 
+                            />
+                            <MetricRow 
+                                label="Runs Test (P-Value)" 
+                                shepVal={latestStats ? formatNum(latestStats.shepRuns, 4) : '—'} 
+                                shaVal={latestStats ? formatNum(latestStats.shaRuns, 4) : '—'} 
+                            />
+                            <MetricRow 
+                                label="Set Score" 
+                                shepVal={latestStats ? formatNum(latestStats.shepAbs, 4) : '—'} 
+                                shaVal={latestStats ? formatNum(latestStats.shaAbs, 4) : '—'} 
+                            />
+                            <MetricRow 
+                                label="Overall Score" 
+                                shepVal={latestStats ? formatNum(latestStats.shepFinal, 2) : '—'} 
+                                shaVal={latestStats ? formatNum(latestStats.shaFinal, 2) : '—'} 
+                                isFinal
+                            />
+                        </div>
+                      </div>
+
+                      {/* 4. Greater Performance by Set Fourth */}
+                      <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-slate-900/30 border border-slate-800 rounded-2xl px-6 py-4">
+                        <div className="text-xs md:text-sm font-bold text-slate-500 uppercase tracking-widest text-center md:text-left">
+                            [greater performance by set]
+                        </div>
+                        <div className="flex items-center gap-6">
+                            <div className="text-cyan-400 font-mono text-lg md:text-xl">[shep32: {benchStatus.betterTally.shep}]</div>
+                            <div className="text-slate-400 font-mono text-lg md:text-xl">[sha256: {benchStatus.betterTally.sha}]</div>
+                        </div>
+                      </div>
+
+                      {/* 5. Console View Table Fifth (Strictly Limited to 10 Rows with Fixed Height) */}
+                      <div className="bg-[#0a0f18] border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col h-[380px]">
+                        <div className="flex items-center gap-2 px-4 py-2 bg-slate-900 border-b border-slate-800 shrink-0">
+                          <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                          <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+                          <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                          <span className="ml-2 text-xs font-mono text-slate-500 uppercase">Live Output Array (Last 10 Rounds)</span>
+                        </div>
+                        <div className="flex-1 overflow-x-auto overflow-y-hidden p-0 relative">
+                          <table className="w-full text-[10px] md:text-xs font-mono text-slate-300 whitespace-nowrap text-right h-full">
+                            <thead className="text-slate-500 border-b border-slate-800 bg-slate-950 sticky top-0">
+                              <tr>
+                                <th className="py-2 px-3 text-left">iter</th>
+                                <th className="py-2 px-3 text-left">category</th>
+                                <th className="py-2 px-3">len</th>
+                                <th className="py-2 px-3 text-cyan-500">shepOk</th>
+                                <th className="py-2 px-3">shaOk</th>
+                                <th className="py-2 px-3 text-cyan-500">shepOnes</th>
+                                <th className="py-2 px-3">shaOnes</th>
+                                <th className="py-2 px-3 text-cyan-500">shepEnt</th>
+                                <th className="py-2 px-3">shaEnt</th>
+                                <th className="py-2 px-3 text-cyan-500">shepRuns</th>
+                                <th className="py-2 px-3">shaRuns</th>
+                                <th className="py-2 px-3 text-cyan-500">shepHam</th>
+                                <th className="py-2 px-3">shaHam</th>
+                                <th className="py-2 px-3 text-cyan-500">shepPosU</th>
+                                <th className="py-2 px-3">shaPosU</th>
+                                <th className="py-2 px-3 text-cyan-500">shepGlobU</th>
+                                <th className="py-2 px-3">shaGlobU</th>
+                                <th className="py-2 px-3 text-cyan-500">shepAbs</th>
+                                <th className="py-2 px-3">shaAbs</th>
+                                <th className="py-2 px-3 text-cyan-400 font-bold">shepFinal</th>
+                                <th className="py-2 px-3 font-bold">shaFinal</th>
+                                <th className="py-2 px-3 text-yellow-500 text-center">better</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {visibleHistory.map((r, i) => (
+                                <tr key={`row-${i}`} className="hover:bg-slate-800/30 border-b border-slate-900/50 h-[30px]">
+                                  <td className="py-1 px-3 text-left">{r.iter}</td>
+                                  <td className="py-1 px-3 text-left">{r.cat}</td>
+                                  <td className="py-1 px-3">{r.len}</td>
+                                  <td className="py-1 px-3 text-cyan-400">{r.shepOk}</td>
+                                  <td className="py-1 px-3 text-slate-400">{r.shaOk}</td>
+                                  <td className="py-1 px-3 text-cyan-400">{formatNum(r.shepOnes)}</td>
+                                  <td className="py-1 px-3 text-slate-400">{formatNum(r.shaOnes)}</td>
+                                  <td className="py-1 px-3 text-cyan-400">{formatNum(r.shepEnt, 3)}</td>
+                                  <td className="py-1 px-3 text-slate-400">{formatNum(r.shaEnt, 3)}</td>
+                                  <td className="py-1 px-3 text-cyan-400">{formatNum(r.shepRuns, 4)}</td>
+                                  <td className="py-1 px-3 text-slate-400">{formatNum(r.shaRuns, 4)}</td>
+                                  <td className="py-1 px-3 text-cyan-400">{formatNum(r.shepHam)}</td>
+                                  <td className="py-1 px-3 text-slate-400">{formatNum(r.shaHam)}</td>
+                                  <td className="py-1 px-3 text-cyan-400">{formatNum(r.shepPosU)}</td>
+                                  <td className="py-1 px-3 text-slate-400">{formatNum(r.shaPosU)}</td>
+                                  <td className="py-1 px-3 text-cyan-400">{formatNum(r.shepGlobU)}</td>
+                                  <td className="py-1 px-3 text-slate-400">{formatNum(r.shaGlobU)}</td>
+                                  <td className="py-1 px-3 text-cyan-400">{formatNum(r.shepSet, 4)}</td>
+                                  <td className="py-1 px-3 text-slate-400">{formatNum(r.shaSet, 4)}</td>
+                                  <td className="py-1 px-3 text-cyan-300 font-bold">{formatNum(r.shepFinal)}</td>
+                                  <td className="py-1 px-3 text-white font-bold">{formatNum(r.shaFinal)}</td>
+                                  <td className={`py-1 px-3 text-center font-bold ${r.better === 'SHEP32' ? 'text-cyan-400' : 'text-slate-300'}`}>
+                                      {r.better}
+                                  </td>
+                                </tr>
+                              ))}
+                              {/* Filler Rows to maintain consistent 10-row height so it won't push the screen */}
+                              {[...Array(paddingRows)].map((_, i) => (
+                                <tr key={`pad-${i}`} className="border-b border-slate-900/50 h-[30px]">
+                                    <td colSpan="22"></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* 6. Audit Download Options Sixth */}
+                      <div className="bg-slate-900/30 border border-slate-800/50 rounded-2xl p-6 flex flex-col md:flex-row gap-4 items-center justify-between">
+                        <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
+                            <button 
+                              onClick={() => downloadTextFile(benchStatus.shepAllHashes.join('\n'), 'SHEP32_Hash_Audit.txt')}
+                              disabled={!benchStatus.shepAllHashes.length}
+                              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-cyan-400 border border-slate-800 rounded-lg text-xs font-bold flex items-center justify-center gap-2 disabled:opacity-50 w-full sm:w-auto"
+                            >
+                              <Download className="w-3.5 h-3.5" /> DL: SHEP32 HASH AUDIT
+                            </button>
+                            <button 
+                              onClick={() => downloadTextFile(benchStatus.shaAllHashes.join('\n'), 'SHA256_Hash_Audit.txt')}
+                              disabled={!benchStatus.shaAllHashes.length}
+                              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-slate-400 border border-slate-800 rounded-lg text-xs font-bold flex items-center justify-center gap-2 disabled:opacity-50 w-full sm:w-auto"
+                            >
+                              <Download className="w-3.5 h-3.5" /> DL: SHA256 HASH AUDIT
+                            </button>
+                        </div>
+                        <button 
+                          onClick={downloadCSV}
+                          disabled={!benchStatus.history.length}
+                          className="px-6 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg w-full md:w-auto"
+                        >
+                          <Download className="w-3.5 h-3.5" /> DL: STATS PER ROUND (CSV)
+                        </button>
+                      </div>
+                    </section>
+                  )}
+                </main>
+              </div>
+
+              {/* Responsive Footer with updated Academic Links */}
+              <footer className="w-full max-w-6xl mt-16 pt-8 border-t border-slate-900 flex flex-col items-center justify-center gap-6 text-slate-500 pb-8">
+                <div className="text-center">
+                  <p className="text-xs font-mono">
+                    <span className="text-slate-400 font-bold uppercase tracking-widest">andrew lehti</span> &copy; 2024-{new Date().getFullYear()}
+                  </p>
+                  <a href="http://metopedia.com" target="_blank" rel="noopener noreferrer" className="text-[10px] font-mono text-cyan-800 hover:text-cyan-600 uppercase tracking-tighter">
+                    metopedia.com
+                  </a>
+                </div>
+                
+                <div className="flex flex-wrap justify-center items-center gap-3 md:gap-4 text-[10px] font-mono tracking-tighter uppercase px-4">
+                  <a href="https://figshare.com/authors/Andrew_Lehti/19424050" target="_blank" rel="noopener noreferrer" className="hover:text-cyan-400 transition-colors">
+                    Figshare
+                  </a>
+                  <span className="text-slate-800">|</span>
+                  <a href="https://cmu.academia.edu/AndrewLehti" target="_blank" rel="noopener noreferrer" className="hover:text-cyan-400 transition-colors">
+                    Academia
+                  </a>
+                  <span className="text-slate-800">|</span>
+                  <a href="https://orcid.org/0000-0002-0051-5851" target="_blank" rel="noopener noreferrer" className="hover:text-cyan-400 transition-colors">
+                    ORCID
+                  </a>
+                  <span className="text-slate-800">|</span>
+                  <a href="https://github.com/andylehti/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 hover:text-cyan-400 transition-colors">
+                    <Github className="w-3 h-3" /> GitHub
+                  </a>
+                </div>
+              </footer>
+            </div>
+          );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

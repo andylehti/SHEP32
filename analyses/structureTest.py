@@ -7,10 +7,10 @@ def findDuplicate():
     keys, hashes = set(), set()
     i, f = 1, 1
     while f <= 10:
-        k, h = fetchKey(i), hashData(i)
+        k, h = hashKey(i), hashData(i)
         if k[:f] in keys:
             f += 1
-            print(i, k[:f], 'XHC255 failed')
+            print(i, k[:f], 'SHEP-32 failed')
         if h[:f] in hashes:
             f += 1
             print(i, h[:f], 'SHA-256 failed')
