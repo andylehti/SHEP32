@@ -1,4 +1,9 @@
-# Main imports
+# =========================
+# Main imports and runtime
+# Build Version: 41D
+
+# NOTES: Core standard-library dependencies, CLI support, and runtime integer configuration.
+# =========================
 import math, os, sys, time, zlib
 
 # Python CLI
@@ -8,8 +13,9 @@ from pathlib import Path
 sys.set_int_max_str_digits(0)
 
 # =========================
-# Hardcoded character base (portable)
-# Build Version: 40A
+# Core constants and general helpers
+
+# NOTES: Shared character sets, caches, fixed thresholds, lightweight validation, formatting, and progress helpers.
 # =========================
 gCharBase = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.:;<>?@[]^&()*$%/\\`\"',_!#"
 def gChar(c): return gCharBase[:c]
@@ -17,9 +23,6 @@ def gChar(c): return gCharBase[:c]
 tDecCache = {}
 ten79 = 10 ** 79
 
-# =========================
-# Small portable helpers
-# =========================
 def splitWs(s): return s.split()
 
 def isHex64(k):
@@ -45,38 +48,6 @@ def _printProg(label, i, total):
         sys.stdout.write("\n")
         sys.stdout.flush()
 
-def _obfuscateProg(text, keyHex, steps, baseLabel, done, total):
-    if steps != 64:
-        _printProg(baseLabel, done + 1, total)
-        return obfuscate(text, keyHex, steps)
-
-    _printProg(baseLabel, done + 1, total)
-    seeds = deriveSeeds(keyHex, steps)
-    t = text
-    mid = len(seeds) // 2
-    for i, s in enumerate(seeds):
-        t = permuteBySeed(t, s)
-        if i + 1 == mid:
-            _printProg(baseLabel, done + 2, total)
-    _printProg(baseLabel, done + 3, total)
-    return t
-
-def _deobfuscateProg(obfText, keyHex, steps, baseLabel, done, total):
-    if steps != 64:
-        _printProg(baseLabel, done + 1, total)
-        return deobfuscate(obfText, keyHex, steps)
-
-    _printProg(baseLabel, done + 1, total)
-    seeds = deriveSeeds(keyHex, steps)
-    t = obfText
-    mid = len(seeds) // 2
-    for i, s in enumerate(reversed(seeds)):
-        t = unpermuteBySeed(t, s)
-        if i + 1 == mid:
-            _printProg(baseLabel, done + 2, total)
-    _printProg(baseLabel, done + 3, total)
-    return t
-
 def _plainSizeBytes(s):
     return 1 + len(s.encode("utf-16-le", errors="surrogatepass"))
 
@@ -85,7 +56,9 @@ def _sepChar(i):
     return a[i % len(a)]
 
 # =========================
-# Deterministic MT19937 (Python-compatible seeding + randrange core)
+# Deterministic RNG engine
+
+# NOTES: Python-compatible MT19937-style deterministic random generator used for reproducible series generation and shuffling.
 # =========================
 class DeterministicRng32:
     def __init__(self, seedValue=1):
@@ -201,11 +174,110 @@ class DeterministicRng32:
         return arr
 
 # =========================
-# SHEP32 CHUNKING
+# Permutation and obfuscation machinery
+
+# NOTES: Hex nibble parsing, seed derivation, deterministic positional permutation, and progress-aware obfuscation wrappers.
 # =========================
+def _hexNibble(c):
+    o = ord(c)
+    if 48 <= o <= 57: return o - 48
+    if 97 <= o <= 102: return o - 87
+    if 65 <= o <= 70: return o - 55
+    raise ValueError("non-hex")
 
-# 3) ADD to: SHEP32 CHUNKING section (below deobfuscate is fine)
+def _hexToNibbles(h):
+    if not isinstance(h, str) or len(h) != 64:
+        raise ValueError("keyHex must be 64 hex chars")
+    return [_hexNibble(c) for c in h]
 
+def _lcg(x):
+    return (48271 * (x % 2147483647)) % 2147483647
+
+def _idx(n, s):
+    r = list(range(n)); x = s or 1
+    for i in range(n - 1, 0, -1):
+        x = _lcg(x); j = x % (i + 1); r[i], r[j] = r[j], r[i]
+    return r
+
+def permuteBySeed(t, s):
+    n = len(t)
+    if n < 2: return t
+    r = _idx(n, s)
+    return "".join(t[i] for i in r)
+
+def unpermuteBySeed(t, s):
+    n = len(t)
+    if n < 2: return t
+    r = _idx(n, s); inv = [0] * n
+    for p, i in enumerate(r): inv[i] = p
+    return "".join(t[inv[i]] for i in range(n))
+
+def deriveSeeds(keyHex, steps):
+    nibbles = _hexToNibbles(keyHex)
+    m = 2147483647
+    acc = 1
+    cum = 0
+    out = [0] * steps
+    for i in range(steps):
+        v = nibbles[i % len(nibbles)]
+        acc = (acc * 131 + v + 1) % m
+        cum = (cum + acc + (i + 1) * 17) % m
+        out[i] = cum or 1
+    return out
+
+def obfuscate(text, keyHex):
+    steps = len(str(keyHex))
+    seeds = deriveSeeds(keyHex, steps)
+    t = text
+    for s in seeds:
+        t = permuteBySeed(t, s)
+    return t
+
+def deobfuscate(obfText, keyHex):
+    steps = len(str(keyHex))
+    seeds = deriveSeeds(keyHex, steps)
+    t = obfText
+    for s in reversed(seeds):
+        t = unpermuteBySeed(t, s)
+    return t
+
+def _obfuscateProg(text, keyHex, steps, baseLabel, done, total):
+    if steps != 64:
+        _printProg(baseLabel, done + 1, total)
+        return obfuscate(text, keyHex, steps)
+
+    _printProg(baseLabel, done + 1, total)
+    seeds = deriveSeeds(keyHex, steps)
+    t = text
+    mid = len(seeds) // 2
+    for i, s in enumerate(seeds):
+        t = permuteBySeed(t, s)
+        if i + 1 == mid:
+            _printProg(baseLabel, done + 2, total)
+    _printProg(baseLabel, done + 3, total)
+    return t
+
+def _deobfuscateProg(obfText, keyHex, steps, baseLabel, done, total):
+    if steps != 64:
+        _printProg(baseLabel, done + 1, total)
+        return deobfuscate(obfText, keyHex, steps)
+
+    _printProg(baseLabel, done + 1, total)
+    seeds = deriveSeeds(keyHex, steps)
+    t = obfText
+    mid = len(seeds) // 2
+    for i, s in enumerate(reversed(seeds)):
+        t = unpermuteBySeed(t, s)
+        if i + 1 == mid:
+            _printProg(baseLabel, done + 2, total)
+    _printProg(baseLabel, done + 3, total)
+    return t
+
+# =========================
+# Chunking, byte conversion, and payload framing
+
+# NOTES: Binary sentinels, chunk splitting, transport header creation/parsing, and key-bound integer encryption wrappers.
+# =========================
 def _toBytesBin(b):
     if not isinstance(b, (bytes, bytearray, memoryview)):
         raise ValueError("_toBytesBin expects bytes")
@@ -311,71 +383,10 @@ def _decryptIntWithKey(cText, hKey):
     nInt = nInt - (key // b)
     return nInt
 
-def _hexNibble(c):
-    o = ord(c)
-    if 48 <= o <= 57: return o - 48
-    if 97 <= o <= 102: return o - 87
-    if 65 <= o <= 70: return o - 55
-    raise ValueError("non-hex")
-
-def _hexToNibbles(h):
-    if not isinstance(h, str) or len(h) != 64:
-        raise ValueError("keyHex must be 64 hex chars")
-    return [_hexNibble(c) for c in h]
-
-def _lcg(x):
-    return (48271 * (x % 2147483647)) % 2147483647
-
-def _idx(n, s):
-    r = list(range(n)); x = s or 1
-    for i in range(n - 1, 0, -1):
-        x = _lcg(x); j = x % (i + 1); r[i], r[j] = r[j], r[i]
-    return r
-
-def permuteBySeed(t, s):
-    n = len(t)
-    if n < 2: return t
-    r = _idx(n, s)
-    return "".join(t[i] for i in r)
-
-def unpermuteBySeed(t, s):
-    n = len(t)
-    if n < 2: return t
-    r = _idx(n, s); inv = [0] * n
-    for p, i in enumerate(r): inv[i] = p
-    return "".join(t[inv[i]] for i in range(n))
-
-def deriveSeeds(keyHex, steps):
-    nibbles = _hexToNibbles(keyHex)
-    m = 2147483647
-    acc = 1
-    cum = 0
-    out = [0] * steps
-    for i in range(steps):
-        v = nibbles[i % len(nibbles)]
-        acc = (acc * 131 + v + 1) % m
-        cum = (cum + acc + (i + 1) * 17) % m
-        out[i] = cum or 1
-    return out
-
-def obfuscate(text, keyHex):
-    steps = len(str(keyHex))
-    seeds = deriveSeeds(keyHex, steps)
-    t = text
-    for s in seeds:
-        t = permuteBySeed(t, s)
-    return t
-
-def deobfuscate(obfText, keyHex):
-    steps = len(str(keyHex))
-    seeds = deriveSeeds(keyHex, steps)
-    t = obfText
-    for s in reversed(seeds):
-        t = unpermuteBySeed(t, s)
-    return t
-
 # =========================
-# SHEP32 CORE
+# Base conversion and structural transforms
+
+# NOTES: Integer/text conversion, custom base encoding, reversible digit manipulation, rotation, splitting, and packing primitives.
 # =========================
 def toBytes(t):
     b = b"\x01" + t.encode("utf-16-le", errors="surrogatepass")
@@ -537,16 +548,29 @@ def Dp(n, m, p):
     return ("".join(str(abs((ord(n[i % ln]) - 48) * (ord(m[i % lm]) - 48))) for i in range(p)))[:p]
 
 def Ep(n, p):
-    ln = len(n)
+    tbl = getattr(Ep, "tbl", None)
+    if tbl is None:
+        tbl = [[0] * 10 for _ in range(10)]
+        for a in range(10):
+            for b in range(10):
+                v = math.pi / ((a + 1) * (b + 1))
+                tbl[a][b] = int(str(v - int(v))[2:])
+        Ep.tbl = tbl
+
+    s = n if isinstance(n, str) else str(n)
+    ln = len(s)
     total = 0
+
     for i in range(p):
-        a = (ord(n[i % ln]) - 48) + 1
-        b = (ord(n[(i + 1) % ln]) - 48) + 1
-        v = math.pi * (1 / a / b)
-        token = str(v - int(v))[2:]
-        total += int(token)
+        total += tbl[ord(s[i % ln]) - 48][ord(s[(i + 1) % ln]) - 48]
+
     return str(total)[-p:]
 
+# =========================
+# Key schedule, folding, and derivation pipeline
+
+# NOTES: Core key-processing logic, data expansion, folding, effective base selection, and deterministic hash-key derivation chain.
+# =========================
 def processKey(n, m=0):
     n, m = str(n), str(m) if m else str(n)
     p, r = len(n), int(n[0])
@@ -560,9 +584,9 @@ def processKey(n, m=0):
     return str(int(int(n) + int(a + b + "0" * (p - 2))) + int(m))[-p:]
 
 def checkData(n, i=10):
-    if not isinstance(n, int) or not isinstance(i, int): raise TypeError("n and i must be int") # potential fix
+    if not isinstance(n, int) or not isinstance(i, int): raise TypeError("n and i must be int")
     if n < 0 or i < 0: raise ValueError("n and i must be >= 0")
-    
+
     n += 32
     ln = len(str(n))
     ten79 = 10 ** 79
@@ -571,7 +595,7 @@ def checkData(n, i=10):
         n *= 3
         n, i = n + i, i + i
 
-    i = 10 * (2**163)
+    i = 10 * (2 ** 163)
     n = int(str(n) + ("0" * 16) + str(ln))
 
     for _ in range(8):
@@ -579,17 +603,109 @@ def checkData(n, i=10):
         n, i = n + i, i + i
 
     n = int(str(n * i) + ("0" * 8)) + i
+
     s = str(n)
-    n = sum(int(s[j:j+80]) for j in range(0, len(s), 80))
-    return kSplit((int(qRotate(str(bSplit(n))) + processKey(n))), n)
+    chunkBase = 10 ** 80
+    packBase = 10 ** 82
+    packed = len(s) + 1
+
+    for j in range(0, len(s), 80):
+        chunk = s[j:j + 80]
+        packed = packed * packBase + (len(chunk) * chunkBase) + int(chunk)
+
+    n = packed
+    left = qRotate(str(bSplit(n)))
+    right = processKey(n)
+    mix = int("1" + str(len(left)).zfill(6) + left + right)
+
+    return kSplit(mix, n)
+
+def manipulateKey(n):
+    return fDecimal(tDecimal(hexLower(n), 16) + int(fDecimal(n, 16), 16), 16)
 
 def fold64(h):
-    h = "".join(c for c in h.lower() if c in "0123456789abcdef")
-    if not h: return "0" * 64
-    if len(h) < 64: return h * ((64 // len(h)) + 1)
-    out = [0] * 64
-    for i, ch in enumerate(h): out[i % 64] ^= int(ch, 16)
-    return "".join("0123456789abcdef"[x] for x in out)
+    def mix(x):
+        x ^= x >> 30
+        x = (x * 0xBF58476D1CE4E5B9) & 0xFFFFFFFFFFFFFFFF
+        x ^= x >> 27
+        x = (x * 0x94D049BB133111EB) & 0xFFFFFFFFFFFFFFFF
+        x ^= x >> 31
+        return x & 0xFFFFFFFFFFFFFFFF
+
+    s = str(h)
+    if not s:
+        s = "0"
+
+    a = 0x243F6A8885A308D3
+    b = 0x13198A2E03707344
+    c = 0xA4093822299F31D0
+    d = 0x082EFA98EC4E6C89
+
+    n = len(s)
+    i = 0
+    p = 1
+    m = 0xFFFFFFFFFFFFFFFF
+
+    while i < n:
+        x = int(s[i:i + 16], 16)
+        x ^= (p * 0x9E3779B97F4A7C15) & m
+        x ^= (n * 0xC2B2AE3D27D4EB4F) & m
+        x &= m
+
+        a = ((a ^ x) * 0x9E3779B185EBCA87) & m
+        b = ((b + x + a) * 0xC2B2AE3D27D4EB4F) & m
+        c = ((c ^ (b + x + 0x165667B19E3779F9)) * 0x94D049BB133111EB) & m
+        d = ((d + c + ((x << 17) & m) + (x >> 47)) * 0xD6E8FEB86659FD93) & m
+
+        i += 16
+        p += 1
+
+    a = mix(a ^ n)
+    b = mix(b ^ (n << 1))
+    c = mix(c ^ (n << 2))
+    d = mix(d ^ (n << 3))
+
+    e = mix(a ^ c ^ 0x243F6A8885A308D3)
+    f = mix(b ^ d ^ 0x13198A2E03707344)
+    g = mix(a ^ b ^ c ^ 0xA4093822299F31D0)
+    j = mix(a ^ b ^ d ^ 0x082EFA98EC4E6C89)
+
+    return f"{e:016x}{f:016x}{g:016x}{j:016x}"
+
+def getB(hexStr):
+    h = str(hexStr).lower()
+    if not h:
+        h = "0"
+
+    f = int(h[:4], 16) if len(h) >= 4 else int(h, 16)
+    l = int(h[-4:], 16) if len(h) >= 4 else int(h, 16)
+    seedVal = ((f >> 8) ^ (l & 0xFF) ^ (f & 0xFF) ^ (l >> 8)) & 0xFF
+
+    if len(h) & 1:
+        h2 = "0" + h
+    else:
+        h2 = h
+
+    parts = []
+    for i in range(0, len(h2), 2):
+        parts.append(f"{((int(h2[i:i+2], 16) - seedVal) & 0xFF):02x}")
+
+    mh = "".join(parts)
+    mh = hexLower(int(mh, 16) + int(h, 16))
+
+    baseParam = int(mh[:4], 16) if len(mh) >= 4 else int(mh, 16)
+    nVal = int(mh, 16)
+    kVal = int(mh[-4:], 16) if len(mh) >= 4 else int(mh, 16)
+
+    splitVal = baseSplit(nVal, kVal, b=(baseParam & 4096) + 64, y=1)
+    splitHex = hexLower(splitVal)
+
+    s = fold64(h + mh + splitHex)
+    return s, getE(s)
+
+def hashKey(n):
+    a = int(fetchKey(n) + hex(n)[2:], 16)
+    return getB(fetchKey(a))
 
 def getE(hex64):
     x = hex64.lower().zfill(64)[-64:]
@@ -599,31 +715,19 @@ def getE(hex64):
     if n % 2 == 0: return int(s4[:-1]) + (100 if len(s4) > 1 and s4[-2] == "0" else 0)
     return int(s4[1:]) + (100 if len(s4) > 1 and s4[1] == "0" else 0)
 
-def getB(hexStr):
-    h = fold64(hexStr)
-    f = int(h[:4], 16); l = int(h[-4:], 16)
-    seedVal = ((f >> 8) ^ (l & 0xFF) ^ (f & 0xFF) ^ (l >> 8)) & 0xFF
-    mh = "".join(f"{((int(h[i:i+2], 16) - seedVal) & 0xFF):02x}" for i in range(0, 64, 2))
-    mh = hexLower(int(mh, 16) + int(h, 16))
-    baseParam = int(mh[:4].zfill(4), 16); nVal = int(mh, 16); kVal = int(mh[-4:].zfill(4), 16)
-    splitVal = baseSplit(nVal, kVal, b=(baseParam & 4096) + 64, y=1)
-    splitHex = hexLower(splitVal)
-    sFull = hexLower(int(h, 16) + int(splitHex, 16))
-    s = fold64(sFull)
-    return s, getE(s)
-
-def manipulateKey(n):
-    return fDecimal(tDecimal(hexLower(n), 16) + int(fDecimal(n, 16), 16), 16)[-63:-1]
-
 def getKey(n, x=78):
     while True:
         n = (n // 8) + int(Ep(str(n // 5), len(str(n))))
         s = str(n)
         if len(s) <= x: return s
 
-def hashKey(n): return getB(fetchKey(n))
 def fetchKey(n): return manipulateKey(tDecimal(manipulateData(getKey(checkData(n + 90, (n % 7) + 1), 79), n), 10))
 
+# =========================
+# SHEP32 core transform pipeline
+
+# NOTES: Forward and reverse layered transforms that apply key-driven splitting, base mixing, digit manipulation, and optional interjection.
+# =========================
 def pData(n, keys, b):
     for key in keys:
         n = keySplit(n, key, 1)
@@ -642,6 +746,11 @@ def dData(n, keys, b):
         n = keySplit(int(n), key, 0)
     return n
 
+# =========================
+# Public encryption, decryption, and key generation API
+
+# NOTES: User-facing entry points for encrypting strings, decrypting payloads, generating personal keys, and chunk-aware large-payload handling.
+# =========================
 def encryptData(n, k=0):
     if not isinstance(n, str):
         raise ValueError("encryptData expects a string")
@@ -753,13 +862,14 @@ def decryptData(n, k):
     n = n - (key // b)
     return fromBytes(n)
 
-def shepKeyFromString(s): return hashKey(toBytes(s))[0].lower()
-
-def generatePKey(n=0):
+def generatePKey(n=None):
     if isinstance(n, str):
         return hashKey(toBytes(n))[0].lower()
     chars = gChar(62)
-    seedVal = int.from_bytes(os.urandom(32), "big") ^ time.time_ns()
+    if n is None:
+        seedVal = int.from_bytes(os.urandom(32), "big") ^ time.time_ns()
+    else:
+        seedVal = int(n)
     r = DeterministicRng32(seedVal)
     ln = r.randint(64, 256)
     s = [chars[r.randBelow(62)] for _ in range(ln)]
@@ -767,13 +877,11 @@ def generatePKey(n=0):
     base62 = "".join(s)
     return hashKey(tDecimal(base62, 62))[0].lower()
 
-if __name__ == "__main__":
-    n = "Andrew Lehti"
-    c, k = encryptData(n)
-    print(c, k)
-    print(decryptData(c, k))
+# =========================
+# Output / execution block
 
-    pKey = generatePKey("my personal key phrase")
-    c2, k2 = encryptData(n, pKey)
-    print(pKey, k2)
-    print(decryptData(c2, pKey))
+# NOTES: Direct generation loop for inspecting deterministic personal key outputs across a numeric range.
+# =========================
+for i in range(5000):
+    k = generatePKey(i)
+    print(f"{i} = {k}")

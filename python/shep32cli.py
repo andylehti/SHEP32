@@ -1,4 +1,9 @@
-# Main imports
+# =========================
+# Main imports and runtime
+# Build Version: 41D
+
+# NOTES: Core standard-library dependencies, CLI support, and runtime integer configuration.
+# =========================
 import math, os, sys, time, zlib
 
 # Python CLI
@@ -8,9 +13,9 @@ from pathlib import Path
 sys.set_int_max_str_digits(0)
 
 # =========================
-# Hardcoded character base (portable)
-# Build Version: 38A
-# NOTES: Builds prior to Build 38A no longer use the same encryption or decryption
+# Core constants and general helpers
+
+# NOTES: Shared character sets, caches, fixed thresholds, lightweight validation, formatting, and progress helpers.
 # =========================
 gCharBase = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.:;<>?@[]^&()*$%/\\`\"',_!#"
 def gChar(c): return gCharBase[:c]
@@ -18,9 +23,6 @@ def gChar(c): return gCharBase[:c]
 tDecCache = {}
 ten79 = 10 ** 79
 
-# =========================
-# Small portable helpers
-# =========================
 def splitWs(s): return s.split()
 
 def isHex64(k):
@@ -46,38 +48,6 @@ def _printProg(label, i, total):
         sys.stdout.write("\n")
         sys.stdout.flush()
 
-def _obfuscateProg(text, keyHex, steps, baseLabel, done, total):
-    if steps != 64:
-        _printProg(baseLabel, done + 1, total)
-        return obfuscate(text, keyHex, steps)
-
-    _printProg(baseLabel, done + 1, total)
-    seeds = deriveSeeds(keyHex, steps)
-    t = text
-    mid = len(seeds) // 2
-    for i, s in enumerate(seeds):
-        t = permuteBySeed(t, s)
-        if i + 1 == mid:
-            _printProg(baseLabel, done + 2, total)
-    _printProg(baseLabel, done + 3, total)
-    return t
-
-def _deobfuscateProg(obfText, keyHex, steps, baseLabel, done, total):
-    if steps != 64:
-        _printProg(baseLabel, done + 1, total)
-        return deobfuscate(obfText, keyHex, steps)
-
-    _printProg(baseLabel, done + 1, total)
-    seeds = deriveSeeds(keyHex, steps)
-    t = obfText
-    mid = len(seeds) // 2
-    for i, s in enumerate(reversed(seeds)):
-        t = unpermuteBySeed(t, s)
-        if i + 1 == mid:
-            _printProg(baseLabel, done + 2, total)
-    _printProg(baseLabel, done + 3, total)
-    return t
-
 def _plainSizeBytes(s):
     return 1 + len(s.encode("utf-16-le", errors="surrogatepass"))
 
@@ -86,7 +56,9 @@ def _sepChar(i):
     return a[i % len(a)]
 
 # =========================
-# Deterministic MT19937 (Python-compatible seeding + randrange core)
+# Deterministic RNG engine
+
+# NOTES: Python-compatible MT19937-style deterministic random generator used for reproducible series generation and shuffling.
 # =========================
 class DeterministicRng32:
     def __init__(self, seedValue=1):
@@ -202,11 +174,110 @@ class DeterministicRng32:
         return arr
 
 # =========================
-# SHEP32 CHUNKING
+# Permutation and obfuscation machinery
+
+# NOTES: Hex nibble parsing, seed derivation, deterministic positional permutation, and progress-aware obfuscation wrappers.
 # =========================
+def _hexNibble(c):
+    o = ord(c)
+    if 48 <= o <= 57: return o - 48
+    if 97 <= o <= 102: return o - 87
+    if 65 <= o <= 70: return o - 55
+    raise ValueError("non-hex")
 
-# 3) ADD to: SHEP32 CHUNKING section (below deobfuscate is fine)
+def _hexToNibbles(h):
+    if not isinstance(h, str) or len(h) != 64:
+        raise ValueError("keyHex must be 64 hex chars")
+    return [_hexNibble(c) for c in h]
 
+def _lcg(x):
+    return (48271 * (x % 2147483647)) % 2147483647
+
+def _idx(n, s):
+    r = list(range(n)); x = s or 1
+    for i in range(n - 1, 0, -1):
+        x = _lcg(x); j = x % (i + 1); r[i], r[j] = r[j], r[i]
+    return r
+
+def permuteBySeed(t, s):
+    n = len(t)
+    if n < 2: return t
+    r = _idx(n, s)
+    return "".join(t[i] for i in r)
+
+def unpermuteBySeed(t, s):
+    n = len(t)
+    if n < 2: return t
+    r = _idx(n, s); inv = [0] * n
+    for p, i in enumerate(r): inv[i] = p
+    return "".join(t[inv[i]] for i in range(n))
+
+def deriveSeeds(keyHex, steps):
+    nibbles = _hexToNibbles(keyHex)
+    m = 2147483647
+    acc = 1
+    cum = 0
+    out = [0] * steps
+    for i in range(steps):
+        v = nibbles[i % len(nibbles)]
+        acc = (acc * 131 + v + 1) % m
+        cum = (cum + acc + (i + 1) * 17) % m
+        out[i] = cum or 1
+    return out
+
+def obfuscate(text, keyHex):
+    steps = len(str(keyHex))
+    seeds = deriveSeeds(keyHex, steps)
+    t = text
+    for s in seeds:
+        t = permuteBySeed(t, s)
+    return t
+
+def deobfuscate(obfText, keyHex):
+    steps = len(str(keyHex))
+    seeds = deriveSeeds(keyHex, steps)
+    t = obfText
+    for s in reversed(seeds):
+        t = unpermuteBySeed(t, s)
+    return t
+
+def _obfuscateProg(text, keyHex, steps, baseLabel, done, total):
+    if steps != 64:
+        _printProg(baseLabel, done + 1, total)
+        return obfuscate(text, keyHex, steps)
+
+    _printProg(baseLabel, done + 1, total)
+    seeds = deriveSeeds(keyHex, steps)
+    t = text
+    mid = len(seeds) // 2
+    for i, s in enumerate(seeds):
+        t = permuteBySeed(t, s)
+        if i + 1 == mid:
+            _printProg(baseLabel, done + 2, total)
+    _printProg(baseLabel, done + 3, total)
+    return t
+
+def _deobfuscateProg(obfText, keyHex, steps, baseLabel, done, total):
+    if steps != 64:
+        _printProg(baseLabel, done + 1, total)
+        return deobfuscate(obfText, keyHex, steps)
+
+    _printProg(baseLabel, done + 1, total)
+    seeds = deriveSeeds(keyHex, steps)
+    t = obfText
+    mid = len(seeds) // 2
+    for i, s in enumerate(reversed(seeds)):
+        t = unpermuteBySeed(t, s)
+        if i + 1 == mid:
+            _printProg(baseLabel, done + 2, total)
+    _printProg(baseLabel, done + 3, total)
+    return t
+
+# =========================
+# Chunking, byte conversion, and payload framing
+
+# NOTES: Binary sentinels, chunk splitting, transport header creation/parsing, and key-bound integer encryption wrappers.
+# =========================
 def _toBytesBin(b):
     if not isinstance(b, (bytes, bytearray, memoryview)):
         raise ValueError("_toBytesBin expects bytes")
@@ -312,69 +383,10 @@ def _decryptIntWithKey(cText, hKey):
     nInt = nInt - (key // b)
     return nInt
 
-def _hexNibble(c):
-    o = ord(c)
-    if 48 <= o <= 57: return o - 48
-    if 97 <= o <= 102: return o - 87
-    if 65 <= o <= 70: return o - 55
-    raise ValueError("non-hex")
-
-def _hexToNibbles(h):
-    if not isinstance(h, str) or len(h) != 64:
-        raise ValueError("keyHex must be 64 hex chars")
-    return [_hexNibble(c) for c in h]
-
-def _lcg(x):
-    return (48271 * (x % 2147483647)) % 2147483647
-
-def _idx(n, s):
-    r = list(range(n)); x = s or 1
-    for i in range(n - 1, 0, -1):
-        x = _lcg(x); j = x % (i + 1); r[i], r[j] = r[j], r[i]
-    return r
-
-def permuteBySeed(t, s):
-    n = len(t)
-    if n < 2: return t
-    r = _idx(n, s)
-    return "".join(t[i] for i in r)
-
-def unpermuteBySeed(t, s):
-    n = len(t)
-    if n < 2: return t
-    r = _idx(n, s); inv = [0] * n
-    for p, i in enumerate(r): inv[i] = p
-    return "".join(t[inv[i]] for i in range(n))
-
-def deriveSeeds(keyHex, steps):
-    nibbles = _hexToNibbles(keyHex)
-    m = 2147483647
-    acc = 1
-    cum = 0
-    out = [0] * steps
-    for i in range(steps):
-        v = nibbles[i % len(nibbles)]
-        acc = (acc * 131 + v + 1) % m
-        cum = (cum + acc + (i + 1) * 17) % m
-        out[i] = cum or 1
-    return out
-
-def obfuscate(text, keyHex, steps=64):
-    seeds = deriveSeeds(keyHex, steps)
-    t = text
-    for s in seeds:
-        t = permuteBySeed(t, s)
-    return t
-
-def deobfuscate(obfText, keyHex, steps=64):
-    seeds = deriveSeeds(keyHex, steps)
-    t = obfText
-    for s in reversed(seeds):
-        t = unpermuteBySeed(t, s)
-    return t
-
 # =========================
-# SHEP32 CORE
+# Base conversion and structural transforms
+
+# NOTES: Integer/text conversion, custom base encoding, reversible digit manipulation, rotation, splitting, and packing primitives.
 # =========================
 def toBytes(t):
     b = b"\x01" + t.encode("utf-16-le", errors="surrogatepass")
@@ -536,16 +548,29 @@ def Dp(n, m, p):
     return ("".join(str(abs((ord(n[i % ln]) - 48) * (ord(m[i % lm]) - 48))) for i in range(p)))[:p]
 
 def Ep(n, p):
-    ln = len(n)
+    tbl = getattr(Ep, "tbl", None)
+    if tbl is None:
+        tbl = [[0] * 10 for _ in range(10)]
+        for a in range(10):
+            for b in range(10):
+                v = math.pi / ((a + 1) * (b + 1))
+                tbl[a][b] = int(str(v - int(v))[2:])
+        Ep.tbl = tbl
+
+    s = n if isinstance(n, str) else str(n)
+    ln = len(s)
     total = 0
+
     for i in range(p):
-        a = (ord(n[i % ln]) - 48) + 1
-        b = (ord(n[(i + 1) % ln]) - 48) + 1
-        v = math.pi * (1 / a / b)
-        token = str(v - int(v))[2:]
-        total += int(token)
+        total += tbl[ord(s[i % ln]) - 48][ord(s[(i + 1) % ln]) - 48]
+
     return str(total)[-p:]
 
+# =========================
+# Key schedule, folding, and derivation pipeline
+
+# NOTES: Core key-processing logic, data expansion, folding, effective base selection, and deterministic hash-key derivation chain.
+# =========================
 def processKey(n, m=0):
     n, m = str(n), str(m) if m else str(n)
     p, r = len(n), int(n[0])
@@ -559,9 +584,9 @@ def processKey(n, m=0):
     return str(int(int(n) + int(a + b + "0" * (p - 2))) + int(m))[-p:]
 
 def checkData(n, i=10):
-    if not isinstance(n, int) or not isinstance(i, int): raise TypeError("n and i must be int") # potential fix
+    if not isinstance(n, int) or not isinstance(i, int): raise TypeError("n and i must be int")
     if n < 0 or i < 0: raise ValueError("n and i must be >= 0")
-    
+
     n += 32
     ln = len(str(n))
     ten79 = 10 ** 79
@@ -570,7 +595,7 @@ def checkData(n, i=10):
         n *= 3
         n, i = n + i, i + i
 
-    i = 10 * (2**163)
+    i = 10 * (2 ** 163)
     n = int(str(n) + ("0" * 16) + str(ln))
 
     for _ in range(8):
@@ -578,17 +603,109 @@ def checkData(n, i=10):
         n, i = n + i, i + i
 
     n = int(str(n * i) + ("0" * 8)) + i
+
     s = str(n)
-    n = sum(int(s[j:j+80]) for j in range(0, len(s), 80))
-    return kSplit((int(qRotate(str(bSplit(n))) + processKey(n))), n)
+    chunkBase = 10 ** 80
+    packBase = 10 ** 82
+    packed = len(s) + 1
+
+    for j in range(0, len(s), 80):
+        chunk = s[j:j + 80]
+        packed = packed * packBase + (len(chunk) * chunkBase) + int(chunk)
+
+    n = packed
+    left = qRotate(str(bSplit(n)))
+    right = processKey(n)
+    mix = int("1" + str(len(left)).zfill(6) + left + right)
+
+    return kSplit(mix, n)
+
+def manipulateKey(n):
+    return fDecimal(tDecimal(hexLower(n), 16) + int(fDecimal(n, 16), 16), 16)
 
 def fold64(h):
-    h = "".join(c for c in h.lower() if c in "0123456789abcdef")
-    if not h: return "0" * 64
-    if len(h) < 64: return h * ((64 // len(h)) + 1)
-    out = [0] * 64
-    for i, ch in enumerate(h): out[i % 64] ^= int(ch, 16)
-    return "".join("0123456789abcdef"[x] for x in out)
+    def mix(x):
+        x ^= x >> 30
+        x = (x * 0xBF58476D1CE4E5B9) & 0xFFFFFFFFFFFFFFFF
+        x ^= x >> 27
+        x = (x * 0x94D049BB133111EB) & 0xFFFFFFFFFFFFFFFF
+        x ^= x >> 31
+        return x & 0xFFFFFFFFFFFFFFFF
+
+    s = str(h)
+    if not s:
+        s = "0"
+
+    a = 0x243F6A8885A308D3
+    b = 0x13198A2E03707344
+    c = 0xA4093822299F31D0
+    d = 0x082EFA98EC4E6C89
+
+    n = len(s)
+    i = 0
+    p = 1
+    m = 0xFFFFFFFFFFFFFFFF
+
+    while i < n:
+        x = int(s[i:i + 16], 16)
+        x ^= (p * 0x9E3779B97F4A7C15) & m
+        x ^= (n * 0xC2B2AE3D27D4EB4F) & m
+        x &= m
+
+        a = ((a ^ x) * 0x9E3779B185EBCA87) & m
+        b = ((b + x + a) * 0xC2B2AE3D27D4EB4F) & m
+        c = ((c ^ (b + x + 0x165667B19E3779F9)) * 0x94D049BB133111EB) & m
+        d = ((d + c + ((x << 17) & m) + (x >> 47)) * 0xD6E8FEB86659FD93) & m
+
+        i += 16
+        p += 1
+
+    a = mix(a ^ n)
+    b = mix(b ^ (n << 1))
+    c = mix(c ^ (n << 2))
+    d = mix(d ^ (n << 3))
+
+    e = mix(a ^ c ^ 0x243F6A8885A308D3)
+    f = mix(b ^ d ^ 0x13198A2E03707344)
+    g = mix(a ^ b ^ c ^ 0xA4093822299F31D0)
+    j = mix(a ^ b ^ d ^ 0x082EFA98EC4E6C89)
+
+    return f"{e:016x}{f:016x}{g:016x}{j:016x}"
+
+def getB(hexStr):
+    h = str(hexStr).lower()
+    if not h:
+        h = "0"
+
+    f = int(h[:4], 16) if len(h) >= 4 else int(h, 16)
+    l = int(h[-4:], 16) if len(h) >= 4 else int(h, 16)
+    seedVal = ((f >> 8) ^ (l & 0xFF) ^ (f & 0xFF) ^ (l >> 8)) & 0xFF
+
+    if len(h) & 1:
+        h2 = "0" + h
+    else:
+        h2 = h
+
+    parts = []
+    for i in range(0, len(h2), 2):
+        parts.append(f"{((int(h2[i:i+2], 16) - seedVal) & 0xFF):02x}")
+
+    mh = "".join(parts)
+    mh = hexLower(int(mh, 16) + int(h, 16))
+
+    baseParam = int(mh[:4], 16) if len(mh) >= 4 else int(mh, 16)
+    nVal = int(mh, 16)
+    kVal = int(mh[-4:], 16) if len(mh) >= 4 else int(mh, 16)
+
+    splitVal = baseSplit(nVal, kVal, b=(baseParam & 4096) + 64, y=1)
+    splitHex = hexLower(splitVal)
+
+    s = fold64(h + mh + splitHex)
+    return s, getE(s)
+
+def hashKey(n):
+    a = int(fetchKey(n) + hex(n)[2:], 16)
+    return getB(fetchKey(a))
 
 def getE(hex64):
     x = hex64.lower().zfill(64)[-64:]
@@ -598,31 +715,19 @@ def getE(hex64):
     if n % 2 == 0: return int(s4[:-1]) + (100 if len(s4) > 1 and s4[-2] == "0" else 0)
     return int(s4[1:]) + (100 if len(s4) > 1 and s4[1] == "0" else 0)
 
-def getB(hexStr):
-    h = fold64(hexStr)
-    f = int(h[:4], 16); l = int(h[-4:], 16)
-    seedVal = ((f >> 8) ^ (l & 0xFF) ^ (f & 0xFF) ^ (l >> 8)) & 0xFF
-    mh = "".join(f"{((int(h[i:i+2], 16) - seedVal) & 0xFF):02x}" for i in range(0, 64, 2))
-    mh = hexLower(int(mh, 16) + int(h, 16))
-    baseParam = int(mh[:4].zfill(4), 16); nVal = int(mh, 16); kVal = int(mh[-4:].zfill(4), 16)
-    splitVal = baseSplit(nVal, kVal, b=(baseParam & 4096) + 64, y=1)
-    splitHex = hexLower(splitVal)
-    sFull = hexLower(int(h, 16) + int(splitHex, 16))
-    s = fold64(sFull)
-    return s, getE(s)
-
-def manipulateKey(n):
-    return fDecimal(tDecimal(hexLower(n), 16) + int(fDecimal(n, 16), 16), 16)[-63:-1]
-
 def getKey(n, x=78):
     while True:
         n = (n // 8) + int(Ep(str(n // 5), len(str(n))))
         s = str(n)
         if len(s) <= x: return s
 
-def hashKey(n): return getB(fetchKey(n))
 def fetchKey(n): return manipulateKey(tDecimal(manipulateData(getKey(checkData(n + 90, (n % 7) + 1), 79), n), 10))
 
+# =========================
+# SHEP32 core transform pipeline
+
+# NOTES: Forward and reverse layered transforms that apply key-driven splitting, base mixing, digit manipulation, and optional interjection.
+# =========================
 def pData(n, keys, b):
     for key in keys:
         n = keySplit(n, key, 1)
@@ -641,9 +746,15 @@ def dData(n, keys, b):
         n = keySplit(int(n), key, 0)
     return n
 
+# =========================
+# Public encryption, decryption, and key generation API
+
+# NOTES: User-facing entry points for encrypting strings, decrypting payloads, generating personal keys, and chunk-aware large-payload handling.
+# =========================
 def encryptData(n, k=0):
     if not isinstance(n, str):
         raise ValueError("encryptData expects a string")
+
     if _plainSizeBytes(n) <= 2048:
         n = toBytes(n)
         if k:
@@ -654,55 +765,70 @@ def encryptData(n, k=0):
             hKey, e = hashKey(n)
         key0 = tDecimal(hKey, 16)
         b = e
+
         keys = [key0]
         key = key0
         for _ in range(9):
             key = int(processKey(key))
             keys.append(key)
+
         n = n + (key // b)
         n = pData(n, keys, b)
         return fDecimal(n, 62), hKey
+
     if k:
         if not isHex64(k): raise ValueError("personalKey must be exactly 64 hex digits")
         hKey = k.lower()
     else:
         hKey = shepKeyFromString(n)
+
     rawBytes = n.encode("utf-16-le", errors="surrogatepass")
     compBytes = zlib.compress(rawBytes, 9)
     parts = _chunkBytes(compBytes, 2048)
+
     totalSteps = len(parts) + 3
     done = 0
+
     cipherParts = []
     lens = []
+
     for p in parts:
         done += 1
         _printProg("ENC", done, totalSteps)
         cPart = _encryptIntWithKey(_toBytesBin(p), hKey)
         cipherParts.append(cPart)
         lens.append(len(cPart))
+
     joinedCipher = "".join(cipherParts)
     header = _buildHeader(2048, len(rawBytes), len(compBytes), lens)
     payload = header + joinedCipher
+
     mixed = _obfuscateProg(payload, hKey, 64, "ENC", done, totalSteps)
     return mixed, hKey
 
 def decryptData(n, k):
     if not isHex64(k): raise ValueError("personalKey must be exactly 64 hex digits")
     k = k.lower()
+
     if isinstance(n, str):
         payloadGuess = None
         try:
             payloadGuess = deobfuscate(n, k, 64)
         except Exception:
             payloadGuess = None
+
         if payloadGuess and payloadGuess.startswith("shz1") and "a0a0" in payloadGuess:
             header, body, chunkSize, origLen, compLen, lens = _parseHeader(payloadGuess)
+
             totalSteps = len(lens) + 3
             done = 0
+
             payload = _deobfuscateProg(n, k, 64, "DEC", done, totalSteps)
             header, body, chunkSize, origLen, compLen, lens = _parseHeader(payload)
+
             compOut = bytearray()
             pos = 0
+
             for L in lens:
                 done += 1
                 _printProg("DEC", done, totalSteps)
@@ -710,16 +836,22 @@ def decryptData(n, k):
                 pos += L
                 pInt = _decryptIntWithKey(cPart, k)
                 compOut.extend(_fromBytesBin(pInt))
+
             if len(compOut) != compLen:
                 raise ValueError("compressed length mismatch")
+
             rawBytes = zlib.decompress(bytes(compOut))
+
             if len(rawBytes) != origLen:
                 raise ValueError("original length mismatch")
+
             return rawBytes.decode("utf-16-le", errors="surrogatepass")
+
     e = getE(k)
     key0 = tDecimal(k, 16)
     b = e
     n = tDecimal(n, 62)
+
     keys = [key0]
     key = key0
     for _ in range(9):
@@ -730,26 +862,33 @@ def decryptData(n, k):
     n = n - (key // b)
     return fromBytes(n)
 
-def shepKeyFromString(s): return hashKey(toBytes(s))[0].lower()
-
-def generatePKey(n=0):
+def generatePKey(n=None):
     if isinstance(n, str):
         return hashKey(toBytes(n))[0].lower()
     chars = gChar(62)
-    seedVal = int.from_bytes(os.urandom(32), "big") ^ time.time_ns()
+    if n is None:
+        seedVal = int.from_bytes(os.urandom(32), "big") ^ time.time_ns()
+    else:
+        seedVal = int(n)
     r = DeterministicRng32(seedVal)
     ln = r.randint(64, 256)
     s = [chars[r.randBelow(62)] for _ in range(ln)]
     r.shuffle(s)
     base62 = "".join(s)
     return hashKey(tDecimal(base62, 62))[0].lower()
-
 # =========================
-# CLI HELPERS
-# =========================
+# CLI imports and runtime
 
+# NOTES: Standard-library imports used by the command-line layer for parsing, filesystem access, JSON output, and fuzzy path matching.
+# =========================
 import json
+import difflib
 
+# =========================
+# CLI constants and file format markers
+
+# NOTES: Versioning, allowed extensions, key file wrappers, metadata framing bytes, and file-size guardrails.
+# =========================
 VERSION = "1.0.1"
 
 DOC_EXTS = {".pdf", ".doc", ".docx", ".txt", ".rtf", ".odt", ".md", ".csv", ".xls", ".xlsx", ".json", ".tsv"}
@@ -763,6 +902,11 @@ META_DELIM = b"\n---\n"
 
 DEFAULT_MAX_BYTES = 1000 * 1024
 
+# =========================
+# CLI formatting, validation, and basic file helpers
+
+# NOTES: Error printing, hex cleanup, text/binary file access, key-file parsing/formatting, stdin payload reading, and extension/size validation.
+# =========================
 def printErr(msg):
     print(f"ERROR: {msg}", file=sys.stderr)
 
@@ -823,27 +967,6 @@ def validateDecExtension(filePath, force):
     if not force and ext not in ALLOWED_DEC_EXTS:
         raise ValueError(f"Invalid decrypt extension '{ext}'. Allowed: .shep32 .sh3 .sh32 or no extension (use --force to override).")
 
-def defaultEncOutPath(inPath):
-    p = Path(inPath)
-    outExt = ".sh3" if p.suffix.lower() in DOC_EXTS else ".shep32"
-    return str(p.with_suffix(outExt))
-
-def chooseEncOutPath(inPath, outArg):
-    if not outArg:
-        return defaultEncOutPath(inPath)
-    if isDirPath(outArg):
-        p = Path(inPath)
-        outExt = ".sh3" if p.suffix.lower() in DOC_EXTS else ".shep32"
-        return str(Path(outArg) / (p.stem + outExt))
-    return str(outArg)
-
-def chooseDecOutPath(srcPath, restoredName, outArg):
-    if not outArg:
-        return str(Path(srcPath).with_name(restoredName))
-    if isDirPath(outArg):
-        return str(Path(outArg) / restoredName)
-    return str(outArg)
-
 def readStdinPayload(delim=None):
     data = sys.stdin.read()
     if delim:
@@ -879,8 +1002,42 @@ def resolveKeyFromArgs(args, require=False):
     if require:
         raise ValueError("A key source is required for decryption (--key, --passphrase, or --keyfile).")
 
-    return ""  # empty means "auto-key" path
+    return ""
 
+def emitJson(obj):
+    print(json.dumps(obj, ensure_ascii=False))
+
+# =========================
+# CLI output path and naming helpers
+
+# NOTES: Default encrypted/decrypted output naming, directory-aware output routing, and restored filename selection.
+# =========================
+def defaultEncOutPath(inPath):
+    p = Path(inPath)
+    outExt = ".sh3" if p.suffix.lower() in DOC_EXTS else ".shep32"
+    return str(p.with_suffix(outExt))
+
+def chooseEncOutPath(inPath, outArg):
+    if not outArg:
+        return defaultEncOutPath(inPath)
+    if isDirPath(outArg):
+        p = Path(inPath)
+        outExt = ".sh3" if p.suffix.lower() in DOC_EXTS else ".shep32"
+        return str(Path(outArg) / (p.stem + outExt))
+    return str(outArg)
+
+def chooseDecOutPath(srcPath, restoredName, outArg):
+    if not outArg:
+        return str(Path(srcPath).with_name(restoredName))
+    if isDirPath(outArg):
+        return str(Path(outArg) / restoredName)
+    return str(outArg)
+
+# =========================
+# File payload framing and raw byte transforms
+
+# NOTES: Structured file payload packing/unpacking and raw byte encryption/decryption wrappers that mirror the updated core pipeline.
+# =========================
 def packFilePayload(filePath, dataBytes):
     p = Path(filePath)
     name = p.stem
@@ -962,9 +1119,208 @@ def decryptBytes(cipherStr, keyHex):
     n = n - (key // b)
     return fromBytesRaw(n)
 
-def emitJson(obj):
-    print(json.dumps(obj, ensure_ascii=False))
+# =========================
+# Path normalization and discovery helpers
 
+# NOTES: User path cleanup, existence checks, fallback path variants, bounded filesystem walking, and fuzzy suggestion ranking for wizard recovery.
+# =========================
+def normUserPath(s):
+    if s is None:
+        return ""
+    s = str(s).strip()
+    if not s:
+        return ""
+    s = os.path.expandvars(s)
+    s = os.path.expanduser(s)
+    return s
+
+def existingFile(p):
+    try:
+        x = Path(p)
+        return x.exists() and x.is_file()
+    except Exception:
+        return False
+
+def existingDir(p):
+    try:
+        x = Path(p)
+        return x.exists() and x.is_dir()
+    except Exception:
+        return False
+
+def tryPathVariants(rawPath):
+    rawPath = normUserPath(rawPath)
+    if not rawPath:
+        return []
+
+    p = Path(rawPath)
+
+    variants = []
+
+    variants.append(p)
+
+    if not p.is_absolute():
+        variants.append(Path.cwd() / p)
+
+    home = Path.home()
+    if not p.is_absolute():
+        variants.append(home / p)
+        
+    seen = set()
+    out = []
+    for v in variants:
+        try:
+            key = str(v)
+        except Exception:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(v)
+    return out
+
+def firstExistingFile(rawPath):
+    for v in tryPathVariants(rawPath):
+        if existingFile(v):
+            return str(Path(v).resolve())
+    return None
+
+def bestEffortSearchRoots():
+    roots = []
+    roots.append(Path.cwd())
+    roots.append(Path.home())
+
+    mnt = Path("/mnt")
+    if mnt.exists() and mnt.is_dir():
+        roots.append(mnt)
+
+    seen = set()
+    out = []
+    for r in roots:
+        try:
+            rr = r.resolve()
+        except Exception:
+            rr = r
+        k = str(rr)
+        if k in seen:
+            continue
+        seen.add(k)
+        if rr.exists() and rr.is_dir():
+            out.append(rr)
+    return out
+
+def _sim(a, b):
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+def _walkLimited(root, maxDepth=6, maxFiles=40000):
+    root = Path(root)
+    rootParts = len(root.parts)
+    filesSeen = 0
+    for dirpath, dirnames, filenames in os.walk(root):
+        try:
+            d = Path(dirpath)
+            depth = len(d.parts) - rootParts
+            if depth > maxDepth:
+                dirnames[:] = []
+                continue
+        except Exception:
+            continue
+
+        for fn in filenames:
+            filesSeen += 1
+            if filesSeen > maxFiles:
+                return
+            yield d, fn
+
+def fuzzyFindInRoot(root, rawPath, maxHits=3, maxDepth=6, maxFiles=40000):
+    raw = normUserPath(rawPath)
+    p = Path(raw)
+    targetName = p.name if p.name else raw
+    targetStem = Path(targetName).stem
+    targetExt = Path(targetName).suffix
+
+    scored = []
+    for d, fn in _walkLimited(root, maxDepth=maxDepth, maxFiles=maxFiles):
+        cand = Path(fn)
+        candStem = cand.stem
+        candExt = cand.suffix
+
+        sStem = _sim(targetStem.lower(), candStem.lower())
+        sName = _sim(targetName.lower(), fn.lower())
+
+        extBonus = 0.0
+        if targetExt:
+            extBonus = 0.12 if candExt.lower() == targetExt.lower() else -0.08
+
+        try:
+            depthPenalty = (len(d.parts) - len(Path(root).parts)) * 0.01
+        except Exception:
+            depthPenalty = 0.0
+
+        score = (0.65 * sStem) + (0.35 * sName) + extBonus - depthPenalty
+
+        if score >= 0.62:
+            scored.append((score, str((d / fn).resolve())))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    out = []
+    seen = set()
+    for _, pathStr in scored:
+        if pathStr in seen:
+            continue
+        seen.add(pathStr)
+        out.append(pathStr)
+        if len(out) >= maxHits:
+            break
+    return out
+
+def rankSuggestions(rawPath):
+    raw = normUserPath(rawPath)
+    p = Path(raw)
+
+    roots = []
+
+    try:
+        if p.parent and existingDir(p.parent):
+            roots.append(p.parent)
+    except Exception:
+        pass
+
+    roots.extend(bestEffortSearchRoots())
+
+    rSeen = set()
+    r2 = []
+    for r in roots:
+        try:
+            rr = Path(r).resolve()
+        except Exception:
+            rr = Path(r)
+        k = str(rr)
+        if k in rSeen:
+            continue
+        rSeen.add(k)
+        if rr.exists() and rr.is_dir():
+            r2.append(rr)
+
+    hits = []
+    for i, r in enumerate(r2):
+        depth = 4 if i == 0 else 6 if i == 1 else 8
+        files = 20000 if i == 0 else 35000 if i == 1 else 60000
+        found = fuzzyFindInRoot(r, rawPath, maxHits=6, maxDepth=depth, maxFiles=files)
+        for f in found:
+            if f not in hits:
+                hits.append(f)
+            if len(hits) >= 3:
+                return hits[:3]
+
+    return hits[:3]
+
+# =========================
+# Command handlers
+
+# NOTES: Top-level CLI actions for key generation, encryption, and decryption, including file/text/stdin routing and optional JSON responses.
+# =========================
 def cmdKey(args):
     k = generatePKey(args.passphrase).lower() if args.passphrase else generatePKey().lower()
     if args.save:
@@ -1163,7 +1519,6 @@ def cmdDec(args):
             print(outPath)
         return 0
 
-    # Plaintext path
     pt = payloadBytes.decode("utf-16-le", errors="surrogatepass")
 
     if args.out:
@@ -1180,215 +1535,11 @@ def cmdDec(args):
         print(pt)
     return 0
 
-def normUserPath(s):
-    if s is None:
-        return ""
-    s = str(s).strip()
-    if not s:
-        return ""
-    s = os.path.expandvars(s)
-    s = os.path.expanduser(s)
-    return s
-
-def existingFile(p):
-    try:
-        x = Path(p)
-        return x.exists() and x.is_file()
-    except Exception:
-        return False
-
-def existingDir(p):
-    try:
-        x = Path(p)
-        return x.exists() and x.is_dir()
-    except Exception:
-        return False
-
-def tryPathVariants(rawPath):
-    rawPath = normUserPath(rawPath)
-    if not rawPath:
-        return []
-
-    p = Path(rawPath)
-
-    variants = []
-
-    # 1) As entered (after ~ and env expansion.)
-    variants.append(p)
-
-    # 2) Relative to CWD if not absolute.
-    if not p.is_absolute():
-        variants.append(Path.cwd() / p)
-
-    # 3) Relative to HOME if not absolute.
-    home = Path.home()
-    if not p.is_absolute():
-        variants.append(home / p)
-        
-    # 4) If user typed like "docs/example.md" and the folder exists under HOME, try that
-    seen = set()
-    out = []
-    for v in variants:
-        try:
-            key = str(v)
-        except Exception:
-            continue
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(v)
-    return out
-
-def firstExistingFile(rawPath):
-    for v in tryPathVariants(rawPath):
-        if existingFile(v):
-            return str(Path(v).resolve())
-    return None
-
-def bestEffortSearchRoots():
-    roots = []
-    roots.append(Path.cwd())
-    roots.append(Path.home())
-
-    mnt = Path("/mnt") # WSL common mount (harmless if missing.)
-    if mnt.exists() and mnt.is_dir():
-        roots.append(mnt)
-
-    seen = set()
-    out = []
-    for r in roots:
-        try:
-            rr = r.resolve()
-        except Exception:
-            rr = r
-        k = str(rr)
-        if k in seen:
-            continue
-        seen.add(k)
-        if rr.exists() and rr.is_dir():
-            out.append(rr)
-    return out
-
-import difflib
-
-def _sim(a, b):
-    return difflib.SequenceMatcher(None, a, b).ratio()
-
-def _walkLimited(root, maxDepth=6, maxFiles=40000):
-    root = Path(root)
-    rootParts = len(root.parts)
-    filesSeen = 0
-    for dirpath, dirnames, filenames in os.walk(root):
-        try:
-            d = Path(dirpath)
-            depth = len(d.parts) - rootParts
-            if depth > maxDepth:
-                dirnames[:] = []
-                continue
-        except Exception:
-            continue
-
-        for fn in filenames:
-            filesSeen += 1
-            if filesSeen > maxFiles:
-                return
-            yield d, fn
-
-def fuzzyFindInRoot(root, rawPath, maxHits=3, maxDepth=6, maxFiles=40000):
-    raw = normUserPath(rawPath)
-    p = Path(raw)
-    targetName = p.name if p.name else raw
-    targetStem = Path(targetName).stem
-    targetExt = Path(targetName).suffix
-
-    scored = []
-    for d, fn in _walkLimited(root, maxDepth=maxDepth, maxFiles=maxFiles):
-        cand = Path(fn)
-        candStem = cand.stem
-        candExt = cand.suffix
-
-        # Score components (stem matters most; ext helps)
-        sStem = _sim(targetStem.lower(), candStem.lower())
-        sName = _sim(targetName.lower(), fn.lower())
-
-        # Prefer same extension when user supplied one
-        extBonus = 0.0
-        if targetExt:
-            extBonus = 0.12 if candExt.lower() == targetExt.lower() else -0.08
-
-        # Prefer closer directory to root slightly (keeps results sane)
-        try:
-            depthPenalty = (len(d.parts) - len(Path(root).parts)) * 0.01
-        except Exception:
-            depthPenalty = 0.0
-
-        score = (0.65 * sStem) + (0.35 * sName) + extBonus - depthPenalty
-
-        if score >= 0.62:
-            scored.append((score, str((d / fn).resolve())))
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-
-    out = []
-    seen = set()
-    for _, pathStr in scored:
-        if pathStr in seen:
-            continue
-        seen.add(pathStr)
-        out.append(pathStr)
-        if len(out) >= maxHits:
-            break
-    return out
-
-def rankSuggestions(rawPath):
-    raw = normUserPath(rawPath)
-    p = Path(raw)
-
-    roots = []
-
-    # 1) If user gave a parent dir that exists, search there first (tightest intent)
-    try:
-        if p.parent and existingDir(p.parent):
-            roots.append(p.parent)
-    except Exception:
-        pass
-
-    # 2) CWD and HOME next
-    roots.extend(bestEffortSearchRoots())
-
-    # Dedup roots
-    rSeen = set()
-    r2 = []
-    for r in roots:
-        try:
-            rr = Path(r).resolve()
-        except Exception:
-            rr = Path(r)
-        k = str(rr)
-        if k in rSeen:
-            continue
-        rSeen.add(k)
-        if rr.exists() and rr.is_dir():
-            r2.append(rr)
-
-    # Fuzzy search: tight roots first, then broader
-    hits = []
-    for i, r in enumerate(r2):
-        depth = 4 if i == 0 else 6 if i == 1 else 8
-        files = 20000 if i == 0 else 35000 if i == 1 else 60000
-        found = fuzzyFindInRoot(r, rawPath, maxHits=6, maxDepth=depth, maxFiles=files)
-        for f in found:
-            if f not in hits:
-                hits.append(f)
-            if len(hits) >= 3:
-                return hits[:3]
-
-    return hits[:3]
-
 # =========================
-# WIZARD and EXCEPTIONS
-# =========================
+# Interactive wizard and recovery flow
 
+# NOTES: Guided terminal workflow for encrypt/decrypt/key tasks and path-recovery assistance when a requested file cannot be found.
+# =========================
 def interactiveWizard():
     print("SHEP32 Interactive Wizard")
     print("1) Encrypt  2) Decrypt  3) Generate Key  4) Exit")
@@ -1515,6 +1666,11 @@ def wizardPickExistingPath(rawPath, label="File"):
             return None
         print("Choose 1, 2, 3, or 4.")
 
+# =========================
+# Argument parser definition
+
+# NOTES: argparse command tree for start, key, encrypt, and decrypt modes with shared compatibility aliases and output controls.
+# =========================
 def buildParser():
     parser = argparse.ArgumentParser(
         prog="shep32",
@@ -1574,9 +1730,10 @@ def buildParser():
     return parser
 
 # =========================
-# MAIN
-# =========================
+# Main entrypoint and exception routing
 
+# NOTES: Top-level command dispatch, zero-arg wizard fallback, CLI exit codes, and standardized exception handling.
+# =========================
 def main(argv=None):
     parser = buildParser()
     args = parser.parse_args(argv)
@@ -1615,5 +1772,6 @@ def main(argv=None):
     except Exception as e:
         printErr(f"Unexpected runtime error: {e}")
         return 1
+
 if __name__ == "__main__":
     raise SystemExit(main())

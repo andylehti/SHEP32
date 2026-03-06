@@ -293,7 +293,7 @@ def buildCandidates():
     if aesOk:
         c.append(("AES_ECB", aesHex))
     c += [
-        ("RC4", rc4Hex),
+        ("RC4", rc4Hex), 
         ("MD5", md5Hex),
         ("SHA1", sha1Hex),
         ("XORRep", xorHex),
