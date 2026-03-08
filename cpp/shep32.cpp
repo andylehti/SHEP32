@@ -6,8 +6,12 @@
 #include <limits>
 #include <cctype>
 #include <cstdint>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
+#include <locale>
+#include <codecvt>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -18,11 +22,78 @@
 using namespace std;
 using boost::multiprecision::cpp_int;
 
+cpp_int parseDec(const string& s);
+
 const string gCharBase = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.:;<>?@[]^&()*$%/\\`\"',_!#";
 const string gAuxBase = "ghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 string deriveCharset(size_t c) { return gCharBase.substr(0, c); }
 string deriveAuxCharset() { return gAuxBase; }
+
+
+string lowerStr(string s) {
+    transform(s.begin(), s.end(), s.begin(), [](unsigned char c){ return char(tolower(c)); });
+    return s;
+}
+
+vector<uint8_t> encodeUtf16Le(const string& s) {
+    wstring_convert<codecvt_utf8_utf16<char16_t>, char16_t> conv;
+    u16string u = conv.from_bytes(s);
+    vector<uint8_t> out;
+    out.reserve(u.size() * 2);
+    for (char16_t ch : u) {
+        out.push_back(static_cast<uint8_t>(ch & 0xFF));
+        out.push_back(static_cast<uint8_t>((ch >> 8) & 0xFF));
+    }
+    return out;
+}
+
+string bytesToHex(const vector<uint8_t>& data) {
+    static const char lut[] = "0123456789abcdef";
+    string out;
+    out.resize(data.size() * 2);
+    for (size_t i = 0; i < data.size(); ++i) {
+        out[i * 2] = lut[data[i] >> 4];
+        out[i * 2 + 1] = lut[data[i] & 0x0F];
+    }
+    return out;
+}
+
+vector<uint8_t> readFileBytes(const string& path) {
+    ifstream fp(path, ios::binary);
+    if (!fp) throw runtime_error("failed to open file: " + path);
+    fp.seekg(0, ios::end);
+    streamoff sz = fp.tellg();
+    if (sz < 0) throw runtime_error("failed to read file size: " + path);
+    fp.seekg(0, ios::beg);
+    vector<uint8_t> raw(static_cast<size_t>(sz));
+    if (sz > 0) fp.read(reinterpret_cast<char*>(raw.data()), sz);
+    if (!fp && sz > 0) throw runtime_error("failed to read file: " + path);
+    return raw;
+}
+
+uint64_t parseU64(const string& s, const string& label) {
+    cpp_int v = parseDec(s);
+    if (v < 0) throw runtime_error(label + " must be >= 0");
+    if (v > numeric_limits<uint64_t>::max()) throw runtime_error(label + " exceeds uint64 range");
+    return v.convert_to<uint64_t>();
+}
+
+void printProgBar(const string& label, uint64_t done, uint64_t total, chrono::steady_clock::time_point started) {
+    if (total == 0) return;
+    const int barW = 30;
+    long double frac = static_cast<long double>(done) / static_cast<long double>(total);
+    if (frac < 0) frac = 0;
+    if (frac > 1) frac = 1;
+    int fill = static_cast<int>(frac * barW);
+    auto elapsed = chrono::duration_cast<chrono::seconds>(chrono::steady_clock::now() - started).count();
+    ostringstream ss;
+    ss << '\r' << label << " [";
+    for (int i = 0; i < barW; ++i) ss << (i < fill ? '#' : '.');
+    ss << "] " << setw(3) << static_cast<int>(frac * 100.0L) << "% " << done << '/' << total << " elapsed " << elapsed << 's';
+    cerr << ss.str() << flush;
+    if (done >= total) cerr << '\n';
+}
 
 cpp_int parseDec(const string& s) {
     if (s.empty()) throw runtime_error("empty decimal string");
@@ -517,20 +588,17 @@ int deriveBaseFactor(const string& hex64) {
     return stoi(s4.substr(1)) + ((s4.size() > 1 && s4[1] == '0') ? 100 : 0);
 }
 
-cpp_int encodeTextBlock(const string& t) {
-    vector<uint8_t> b;
-    b.reserve(1 + t.size() * 2);
-    b.push_back(0x01);
-    for (unsigned char ch : t) {
-        b.push_back(ch);
-        b.push_back(0x00);
-    }
-    cpp_int out = 0;
-    for (uint8_t x : b) {
+cpp_int encodeSentinel(const vector<uint8_t>& raw) {
+    cpp_int out = 1;
+    for (uint8_t x : raw) {
         out <<= 8;
         out += x;
     }
     return out;
+}
+
+cpp_int encodeTextBlock(const string& t) {
+    return encodeSentinel(encodeUtf16Le(t));
 }
 
 string fold64(const string& h) {
@@ -754,8 +822,188 @@ string generateSeedSource() {
     return string(s.begin(), s.end());
 }
 
-cpp_int normalizeSeedInput(const string& x) { return encodeTextBlock(x); }
-cpp_int normalizeSeedInput(const cpp_int& x) { return encodeTextBlock(decStr(x)); }
+vector<uint8_t> normalizeSeedBytes(const string& x) { return encodeUtf16Le(x); }
+vector<uint8_t> normalizeSeedBytes(const cpp_int& x) { return encodeUtf16Le(decStr(x)); }
+vector<uint8_t> normalizeSeedBytes(const vector<uint8_t>& x) { return x; }
+
+cpp_int normalizeSeedInput(const string& x) { return encodeSentinel(normalizeSeedBytes(x)); }
+cpp_int normalizeSeedInput(const cpp_int& x) { return encodeSentinel(normalizeSeedBytes(x)); }
+cpp_int normalizeSeedInput(const vector<uint8_t>& x) { return encodeSentinel(x); }
+
+vector<uint8_t> diffuseBlocks(const vector<uint8_t>& data, int v = 1, int cols = 73, int rows = 72) {
+    (void)v;
+    vector<uint8_t> raw = data;
+    cols = int(cols);
+    rows = int(rows);
+    if (cols < 1 || rows < 1) throw runtime_error("cols and rows must be >= 1");
+
+    const uint64_t mask = 0xFFFFFFFFFFFFFFFFULL;
+    const int laneCount = cols;
+    const size_t blockBytes = max<size_t>(1, static_cast<size_t>(((cols * rows) + 7) / 8));
+    const size_t outLen = static_cast<size_t>(cols) * 5;
+
+    auto rot = [&](uint64_t x, int r) -> uint64_t {
+        x &= mask;
+        r &= 63;
+        if (r == 0) return x;
+        return ((x << r) | (x >> (64 - r))) & mask;
+    };
+
+    auto mix64 = [&](uint64_t x) -> uint64_t {
+        x &= mask;
+        x ^= x >> 30;
+        x = (x * 0xBF58476D1CE4E5B9ULL) & mask;
+        x ^= x >> 27;
+        x = (x * 0x94D049BB133111EBULL) & mask;
+        x ^= x >> 31;
+        return x & mask;
+    };
+
+    auto h64 = [&](const string& x) -> uint64_t {
+        string y = fold64(x);
+        cpp_int z = parseStdBase(y, 16) & cpp_int(mask);
+        return z.convert_to<uint64_t>();
+    };
+
+    auto word64 = [&](const vector<uint8_t>& b, size_t i) -> uint64_t {
+        uint64_t out = 0;
+        size_t lim = min<size_t>(8, b.size() > i ? b.size() - i : 0);
+        for (size_t j = 0; j < lim; ++j) out |= (uint64_t(b[i + j]) << (8 * j));
+        return out;
+    };
+
+    auto runPass = [&](const vector<uint8_t>& srcIn, uint64_t seedA, uint64_t seedB) -> pair<size_t, vector<uint8_t>> {
+        vector<uint8_t> src = srcIn;
+        vector<uint64_t> state(laneCount, 0);
+        for (int i = 0; i < laneCount; ++i) {
+            state[i] = mix64(seedA ^ ((uint64_t(i + 1) * 0x9E3779B185EBCA87ULL) & mask) ^ rot(seedB, (i % 31) + 1) ^ (uint64_t(src.size() + i) * 0xD6E8FEB86659FD93ULL));
+        }
+
+        size_t blockCount = 0;
+        for (size_t off = 0; off < src.size(); off += blockBytes) {
+            vector<uint8_t> block(src.begin() + off, src.begin() + min(src.size(), off + blockBytes));
+            size_t blockLen = block.size();
+            uint64_t blockState = mix64(seedB ^ uint64_t(blockCount) ^ uint64_t(blockLen) ^ rot(state[blockCount % laneCount], ((blockCount % 29) + 1)));
+            size_t wordCount = (blockLen + 7) / 8;
+
+            for (size_t wIndex = 0; wIndex < wordCount; ++wIndex) {
+                size_t pos = wIndex * 8;
+                uint64_t word = word64(block, pos);
+                size_t g = off + pos;
+                int i = int((word + g + blockCount) % laneCount);
+                int j = int((i + 17 + (wIndex % 13)) % laneCount);
+                int k = int((uint64_t(i) * 7 + 29 + (word >> 11)) % laneCount);
+                uint64_t a = state[i];
+                uint64_t b = state[j];
+                uint64_t c = state[k];
+                uint64_t x = mix64(word ^ blockState ^ (uint64_t(g + 1) * 0x9E3779B185EBCA87ULL) ^ uint64_t(src.size()));
+                state[i] = mix64((a + x + rot(b, 13) + rot(c, 29)) & mask);
+                state[j] = mix64(b ^ x ^ rot(a, 17) ^ rot(c, 37));
+                state[k] = mix64((c + x + rot(b, 43) + rot(a, 53) + uint64_t(wordCount) + uint64_t(wIndex)) & mask);
+                blockState = mix64(blockState ^ x ^ state[i] ^ rot(state[j], 11) ^ rot(state[k], 23));
+                if ((wIndex & 7ULL) == 7ULL) {
+                    int t = int((i + j + k + int(wIndex)) % laneCount);
+                    int u = (t + 31) % laneCount;
+                    state[t] = mix64(state[t] ^ blockState ^ rot(state[u], 19) ^ (uint64_t(g + 1) * 0xD6E8FEB86659FD93ULL));
+                    state[u] = mix64((state[u] + state[t] + rot(blockState, 27) + x) & mask);
+                }
+            }
+
+            int p = int(blockCount % laneCount);
+            int q = (p + 23) % laneCount;
+            int r = (p + 47) % laneCount;
+            uint64_t d = mix64(blockState ^ uint64_t(blockLen) ^ uint64_t(off) ^ uint64_t(src.size()));
+            state[p] = mix64(state[p] ^ d ^ rot(blockState, 17));
+            state[q] = mix64((state[q] + d + rot(state[p], 9) + uint64_t(src.size()) + uint64_t(blockCount)) & mask);
+            state[r] = mix64(state[r] ^ rot(d, 33) ^ state[p] ^ state[q] ^ uint64_t(blockLen));
+            ++blockCount;
+        }
+
+        int rounds = max(6, rows / 12);
+        for (int rnd = 0; rnd < rounds; ++rnd) {
+            uint64_t seed = mix64(seedA ^ seedB ^ uint64_t(rnd) ^ uint64_t(src.size()) ^ state[rnd % laneCount]);
+            uint64_t prev = state.back();
+            for (int i = 0; i < laneCount; ++i) {
+                uint64_t cur = state[i];
+                uint64_t nxt = state[(i + 1) % laneCount];
+                uint64_t far = state[(i * 7 + rnd + 3) % laneCount];
+                uint64_t m = mix64(cur ^ rot(nxt, ((i + rnd) % 31) + 1) ^ rot(far, ((i * 3 + rnd) % 31) + 1) ^ prev ^ seed ^ uint64_t(i) ^ uint64_t(src.size()));
+                state[i] = mix64((cur + m + rot(prev, 13) + rot(seed, 1 + ((i + rnd) % 31))) & mask);
+                prev = cur;
+            }
+            int pivot = rnd % laneCount;
+            state[pivot] = mix64(state[pivot] ^ seed ^ rot(state[(pivot + 19) % laneCount], 7));
+            state[(pivot + 37) % laneCount] = mix64((state[(pivot + 37) % laneCount] + rot(seed, 23) + state[pivot]) & mask);
+        }
+
+        vector<uint8_t> out(outLen, 0);
+        uint64_t seed = mix64(seedA ^ seedB ^ uint64_t(src.size()) ^ uint64_t(blockCount));
+        size_t pos = 0;
+        for (int phase = 0; phase < 5; ++phase) {
+            for (int i = 0; i < laneCount; ++i) {
+                uint64_t a = state[i];
+                uint64_t b = state[(i + phase + 1) % laneCount];
+                uint64_t c = state[(i * 11 + phase + 7) % laneCount];
+                uint64_t q = mix64(a ^ rot(b, ((phase + i) % 31) + 1) ^ rot(c, ((phase * 7 + i) % 31) + 1) ^ seed ^ (uint64_t(phase) << 8) ^ uint64_t(i));
+                out[pos++] = uint8_t(q & 0xFF);
+                state[i] = mix64((a + q + rot(c, 17) + rot(seed, 1 + (i % 31))) & mask);
+            }
+            seed = mix64(seed ^ state[phase % laneCount] ^ rot(state[(phase * 11 + 3) % laneCount], 19));
+        }
+
+        return {blockCount, out};
+    };
+
+    size_t totalLen = raw.size();
+    vector<uint8_t> head(raw.begin(), raw.begin() + min<size_t>(128, raw.size()));
+    uint64_t seedA = mix64(uint64_t(totalLen) ^ uint64_t(cols) ^ (uint64_t(rows) << 32) ^ 0x243F6A8885A308D3ULL);
+    uint64_t seedB;
+    if (raw.empty()) seedB = mix64(seedA ^ 0x13198A2E03707344ULL);
+    else {
+        vector<uint8_t> head256(raw.begin(), raw.begin() + min<size_t>(256, raw.size()));
+        vector<uint8_t> tail256(raw.end() - min<size_t>(256, raw.size()), raw.end());
+        seedB = h64(bytesToHex(head256) + "|" + bytesToHex(tail256) + "|" + to_string(totalLen));
+    }
+
+    auto passA = runPass(raw, seedA, seedB);
+    vector<uint8_t> mixIn = passA.second;
+    mixIn.insert(mixIn.end(), head.begin(), head.end());
+    vector<uint8_t> arrA64(passA.second.begin(), passA.second.begin() + min<size_t>(64, passA.second.size()));
+    uint64_t seedC = mix64(seedB ^ h64(bytesToHex(head) + "|" + bytesToHex(arrA64) + "|" + to_string(mixIn.size())));
+    auto passB = runPass(mixIn, seedB, seedC);
+
+    vector<uint8_t> merged(outLen, 0);
+    uint64_t mergeSeed = mix64(seedA ^ seedB ^ seedC ^ uint64_t(mixIn.size()) ^ uint64_t(outLen));
+    size_t headLen = head.size();
+    for (size_t i = 0; i < outLen; ++i) {
+        uint8_t a = passA.second[i];
+        uint8_t b = passB.second[i];
+        uint8_t c = headLen ? head[i % headLen] : uint8_t((i * 17 + totalLen) & 0xFF);
+        uint64_t m = mix64(mergeSeed ^ uint64_t(a) ^ (uint64_t(b) << 8) ^ (uint64_t(c) << 16) ^ (uint64_t(i) << 24));
+        merged[i] = uint8_t((uint64_t(a) ^ uint64_t(b) ^ uint64_t(c) ^ m ^ (m >> 8) ^ (m >> 16) ^ (m >> 24)) & 0xFF);
+        mergeSeed = mix64(mergeSeed ^ m ^ uint64_t(a) ^ (uint64_t(b) << 8) ^ (uint64_t(c) << 16) ^ uint64_t(i));
+    }
+    return merged;
+}
+
+string computeKeyDigestStream(const vector<uint8_t>& raw, int directBits = 256, int laneBits = 336, int blockBytes = 4096) {
+    (void)laneBits;
+    (void)blockBytes;
+    int directBytes = max(1, (int(directBits) + 7) / 8);
+    if (int(raw.size()) <= directBytes) return lowerStr(computeKeyDigest(encodeSentinel(raw)).first);
+    vector<uint8_t> diffused = diffuseBlocks(raw, 1);
+    return lowerStr(computeKeyDigest(encodeSentinel(diffused)).first);
+}
+
+string computeKeyDigestFile(const string& path, int directBits = 256, int laneBits = 336, int blockBytes = 65536) {
+    (void)laneBits;
+    (void)blockBytes;
+    vector<uint8_t> raw = readFileBytes(path);
+    int directBytes = max(1, (int(directBits) + 7) / 8);
+    if (int(raw.size()) <= directBytes) return lowerStr(computeKeyDigest(encodeSentinel(raw)).first);
+    vector<uint8_t> diffused = diffuseBlocks(raw, 1);
+    return lowerStr(computeKeyDigest(encodeSentinel(diffused)).first);
+}
 
 struct TraceState {
     cpp_int input;
@@ -906,66 +1154,228 @@ string computeTraceExtended(const TraceState& trace, int count = 8) {
     return distributeSymbols(body, pepper, count);
 }
 
-string generatePrimaryKey() { return computeKeyDigest(normalizeSeedInput(generateSeedSource())).first; }
-string generatePrimaryKey(const string& x) { return computeKeyDigest(normalizeSeedInput(x)).first; }
-string generatePrimaryKey(const cpp_int& x) { return computeKeyDigest(normalizeSeedInput(x)).first; }
-
-string generateExtendedKey() { return computeTraceExtended(traceWideState(normalizeSeedInput(generateSeedSource())), 8); }
-string generateExtendedKey(const string& x, int count = 8) { return computeTraceExtended(traceWideState(normalizeSeedInput(x)), count); }
-string generateExtendedKey(const cpp_int& x, int count = 8) { return computeTraceExtended(traceWideState(normalizeSeedInput(x)), count); }
-
-string generateKey(int mode = 0, int count = 8) {
-    return mode == 0 ? generatePrimaryKey() : generateExtendedKey();
+string computeTraceDigest(const TraceState& trace) {
+    string root = bindState(trace, "32|FINAL");
+    string a = fold64(root + truncatePrefix(trace.value, 128));
+    string b = lowerStr(computeBound(a).first);
+    string c = fold64(b + root + truncatePrefixStr(trace.right, 128));
+    return c.substr(0, 64);
 }
 
-string generateKey(const string& x, int mode = 0, int count = 8) {
-    return mode == 0 ? generatePrimaryKey(x) : generateExtendedKey(x, count);
+string generatePrimaryKey(int directBits = 256, int laneBits = 336, int blockBytes = 4096) {
+    return computeKeyDigestStream(normalizeSeedBytes(generateSeedSource()), directBits, laneBits, blockBytes);
+}
+string generatePrimaryKey(const string& x, int directBits = 256, int laneBits = 336, int blockBytes = 4096) {
+    return computeKeyDigestStream(normalizeSeedBytes(x), directBits, laneBits, blockBytes);
+}
+string generatePrimaryKey(const cpp_int& x, int directBits = 256, int laneBits = 336, int blockBytes = 4096) {
+    return computeKeyDigestStream(normalizeSeedBytes(x), directBits, laneBits, blockBytes);
 }
 
-string generateKey(const cpp_int& x, int mode = 0, int count = 8) {
-    return mode == 0 ? generatePrimaryKey(x) : generateExtendedKey(x, count);
+string generateExtendedKey(int count = 8, int directBits = 256, int laneBits = 336, int blockBytes = 4096) {
+    (void)laneBits;
+    (void)blockBytes;
+    vector<uint8_t> raw = normalizeSeedBytes(generateSeedSource());
+    int directBytes = max(1, (int(directBits) + 7) / 8);
+    if (int(raw.size()) <= directBytes) return computeTraceExtended(traceWideState(encodeSentinel(raw)), count);
+    vector<uint8_t> diffused = diffuseBlocks(raw, 1);
+    return computeTraceExtended(traceWideState(encodeSentinel(diffused)), count);
+}
+string generateExtendedKey(const string& x, int count = 8, int directBits = 256, int laneBits = 336, int blockBytes = 4096) {
+    (void)laneBits;
+    (void)blockBytes;
+    vector<uint8_t> raw = normalizeSeedBytes(x);
+    int directBytes = max(1, (int(directBits) + 7) / 8);
+    if (int(raw.size()) <= directBytes) return computeTraceExtended(traceWideState(encodeSentinel(raw)), count);
+    vector<uint8_t> diffused = diffuseBlocks(raw, 1);
+    return computeTraceExtended(traceWideState(encodeSentinel(diffused)), count);
+}
+string generateExtendedKey(const cpp_int& x, int count = 8, int directBits = 256, int laneBits = 336, int blockBytes = 4096) {
+    (void)laneBits;
+    (void)blockBytes;
+    vector<uint8_t> raw = normalizeSeedBytes(x);
+    int directBytes = max(1, (int(directBits) + 7) / 8);
+    if (int(raw.size()) <= directBytes) return computeTraceExtended(traceWideState(encodeSentinel(raw)), count);
+    vector<uint8_t> diffused = diffuseBlocks(raw, 1);
+    return computeTraceExtended(traceWideState(encodeSentinel(diffused)), count);
+}
+
+string generateKey(int mode = 0, int count = 8, int directBits = 256, int laneBits = 336, int blockBytes = 4096) {
+    return mode == 0 ? generatePrimaryKey(directBits, laneBits, blockBytes) : generateExtendedKey(count, directBits, laneBits, blockBytes);
+}
+
+string generateKey(const string& x, int mode = 0, int count = 8, int directBits = 256, int laneBits = 336, int blockBytes = 4096) {
+    return mode == 0 ? generatePrimaryKey(x, directBits, laneBits, blockBytes) : generateExtendedKey(x, count, directBits, laneBits, blockBytes);
+}
+
+string generateKey(const cpp_int& x, int mode = 0, int count = 8, int directBits = 256, int laneBits = 336, int blockBytes = 4096) {
+    return mode == 0 ? generatePrimaryKey(x, directBits, laneBits, blockBytes) : generateExtendedKey(x, count, directBits, laneBits, blockBytes);
+}
+
+string generateKeyFile(const string& path, int mode = 0, int count = 8, int directBits = 256, int laneBits = 336, int blockBytes = 65536) {
+    if (mode == 0) return computeKeyDigestFile(path, directBits, laneBits, blockBytes);
+    vector<uint8_t> raw = readFileBytes(path);
+    int directBytes = max(1, (int(directBits) + 7) / 8);
+    if (int(raw.size()) <= directBytes) return computeTraceExtended(traceWideState(encodeSentinel(raw)), count);
+    vector<uint8_t> diffused = diffuseBlocks(raw, 1);
+    return computeTraceExtended(traceWideState(encodeSentinel(diffused)), count);
+}
+
+vector<string> generateHashRange(const cpp_int& start, uint64_t hashes, int mode = 0, int count = 8, int directBits = 256, int laneBits = 336, int blockBytes = 4096, bool bare = false, bool showProgress = false, const string& label = "HASH") {
+    vector<string> out;
+    out.reserve(static_cast<size_t>(hashes));
+    cpp_int cur = start;
+    auto started = chrono::steady_clock::now();
+    for (uint64_t i = 0; i < hashes; ++i) {
+        string hash = generateKey(cur, mode, count, directBits, laneBits, blockBytes);
+        out.push_back(bare ? hash : (decStr(cur) + " = " + hash));
+        cur += 1;
+        if (showProgress) printProgBar(label, i + 1, hashes, started);
+    }
+    return out;
+}
+
+void writeHashRange(const string& path, const cpp_int& start, uint64_t hashes, int mode = 0, int count = 8, int directBits = 256, int laneBits = 336, int blockBytes = 4096, bool bare = false, bool showProgress = true, const string& label = "HASH") {
+    ofstream fp(path, ios::binary);
+    if (!fp) throw runtime_error("failed to open output file: " + path);
+    cpp_int cur = start;
+    auto started = chrono::steady_clock::now();
+    for (uint64_t i = 0; i < hashes; ++i) {
+        string hash = generateKey(cur, mode, count, directBits, laneBits, blockBytes);
+        if (bare) fp << hash << '\n';
+        else fp << decStr(cur) << " = " << hash << '\n';
+        if (!fp) throw runtime_error("failed while writing output file: " + path);
+        cur += 1;
+        if (showProgress) printProgBar(label, i + 1, hashes, started);
+    }
+}
+
+void printHelp(const char* exe) {
+    cout
+        << "Usage:\n"
+        << "  " << exe << " [--text TEXT | --value INT | --file PATH | --start INT --hashes N] [options]\n\n"
+        << "Inputs:\n"
+        << "  --text TEXT         Hash a UTF-8 text string\n"
+        << "  --value INT         Hash a decimal integer value\n"
+        << "  --file PATH         Hash file contents\n"
+        << "  --start INT         Starting integer for range generation\n"
+        << "  --hashes N          Number of hashes to generate from --start\n"
+        << "  --out PATH          Write range output to file without printing hashes\n\n"
+        << "Options:\n"
+        << "  --mode N            0 = primary, 1 = extended\n"
+        << "  --count N           Extended-key insert count (1..8)\n"
+        << "  --direct-bits N     Direct-route threshold bits (default 256)\n"
+        << "  --lane-bits N       Reserved compatibility option (default 336)\n"
+        << "  --block-bytes N     Reserved compatibility option (default 4096 or 65536 for files)\n"
+        << "  --bare              Output only hashes in range mode\n"
+        << "  --no-progress       Disable progress bar in range-to-file mode\n"
+        << "  --help              Show this help\n\n"
+        << "Examples:\n"
+        << "  " << exe << " --text \"Andrew\" --mode 0\n"
+        << "  " << exe << " --value 12345678901234567890 --mode 1 --count 8\n"
+        << "  " << exe << " --file sample.bin --mode 0\n"
+        << "  " << exe << " --start 1000 --hashes 500 --out hashes.txt\n";
 }
 
 int main(int argc, char* argv[]) {
-    bool hasText = false;
-    string textValue;
-    bool hasStart = false;
-    bool hasEnd = false;
-    long long start = 0;
-    long long end = 0;
-    int mode = 0;
-    int count = 8;
+    try {
+        bool hasText = false;
+        bool hasValue = false;
+        bool hasFile = false;
+        bool hasStart = false;
+        bool hasHashes = false;
+        bool bare = false;
+        bool showProgress = true;
+        string textValue;
+        string filePath;
+        cpp_int valueInt = 0;
+        cpp_int startValue = 0;
+        uint64_t hashes = 0;
+        string outPath;
+        int mode = 0;
+        int count = 8;
+        int directBits = 256;
+        int laneBits = 336;
+        int blockBytes = 4096;
 
-    for (int i = 1; i < argc; ++i) {
-        string arg = argv[i];
-        if (arg == "--text" && i + 1 < argc) {
-            hasText = true;
-            textValue = argv[++i];
-        } else if (arg == "--start" && i + 1 < argc) {
-            hasStart = true;
-            start = stoll(argv[++i]);
-        } else if (arg == "--end" && i + 1 < argc) {
-            hasEnd = true;
-            end = stoll(argv[++i]);
-        } else if (arg == "--mode" && i + 1 < argc) {
-            mode = stoi(argv[++i]);
-        } else if (arg == "--count" && i + 1 < argc) {
-            count = stoi(argv[++i]);
+        for (int i = 1; i < argc; ++i) {
+            string arg = argv[i];
+            auto need = [&](const string& name) -> string {
+                if (i + 1 >= argc) throw runtime_error("missing value for " + name);
+                return string(argv[++i]);
+            };
+            if (arg == "--text") {
+                hasText = true;
+                textValue = need(arg);
+            } else if (arg == "--value") {
+                hasValue = true;
+                valueInt = parseDec(need(arg));
+            } else if (arg == "--file") {
+                hasFile = true;
+                filePath = need(arg);
+            } else if (arg == "--start") {
+                hasStart = true;
+                startValue = parseDec(need(arg));
+            } else if (arg == "--hashes") {
+                hasHashes = true;
+                hashes = parseU64(need(arg), "--hashes");
+            } else if (arg == "--out") {
+                outPath = need(arg);
+            } else if (arg == "--mode") {
+                mode = stoi(need(arg));
+            } else if (arg == "--count") {
+                count = stoi(need(arg));
+            } else if (arg == "--direct-bits") {
+                directBits = stoi(need(arg));
+            } else if (arg == "--lane-bits") {
+                laneBits = stoi(need(arg));
+            } else if (arg == "--block-bytes") {
+                blockBytes = stoi(need(arg));
+            } else if (arg == "--bare") {
+                bare = true;
+            } else if (arg == "--no-progress") {
+                showProgress = false;
+            } else if (arg == "--help" || arg == "-h") {
+                printHelp(argv[0]);
+                return 0;
+            } else {
+                throw runtime_error("unknown argument: " + arg);
+            }
         }
-    }
 
-    if (hasText) {
-        cout << generateKey(textValue, mode, count) << '\n';
-        return 0;
-    }
+        if (count < 1 || count > 8) throw runtime_error("--count must be in 1..8");
+        if (mode != 0 && mode != 1 && mode != 333) throw runtime_error("--mode must be 0 or 1");
+        if (directBits < 1) throw runtime_error("--direct-bits must be >= 1");
 
-    if (hasStart && hasEnd && end >= start) {
-        for (long long i = start; i <= end; ++i) {
-            cout << i << " = " << generateKey(cpp_int(i), mode, count) << '\n';
+        if (hasStart || hasHashes || !outPath.empty()) {
+            if (!hasStart) throw runtime_error("--start is required for range mode");
+            if (!hasHashes) throw runtime_error("--hashes is required for range mode");
+            if (outPath.empty()) {
+                auto lines = generateHashRange(startValue, hashes, mode, count, directBits, laneBits, blockBytes, bare, false, "HASH");
+                for (const auto& line : lines) cout << line << '\n';
+            } else {
+                writeHashRange(outPath, startValue, hashes, mode, count, directBits, laneBits, blockBytes, bare, showProgress, "HASH");
+            }
+            return 0;
         }
-        return 0;
-    }
 
-    cout << generateKey(mode, count) << '\n';
-    return 0;
+        if (hasFile) {
+            cout << generateKeyFile(filePath, mode, count, directBits, laneBits, 65536) << '\n';
+            return 0;
+        }
+        if (hasText) {
+            cout << generateKey(textValue, mode, count, directBits, laneBits, blockBytes) << '\n';
+            return 0;
+        }
+        if (hasValue) {
+            cout << generateKey(valueInt, mode, count, directBits, laneBits, blockBytes) << '\n';
+            return 0;
+        }
+
+        cout << generateKey(mode, count, directBits, laneBits, blockBytes) << '\n';
+        return 0;
+    } catch (const exception& e) {
+        cerr << "error: " << e.what() << '\n';
+        return 1;
+    }
 }
