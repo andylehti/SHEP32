@@ -1,7 +1,7 @@
 
 # =========================
 # Main imports and runtime
-# Build Version: 58C
+# Build Version: 58A
 # NOTES: Standard-library dependencies required for transforms, progress output, compression, and deterministic RNG support.
 # =========================
 
@@ -9,7 +9,7 @@ import math, os, sys, time, zlib
 
 # =========================
 # Core constants and general helpers
-# Build Version: 58C
+# Build Version: 58A
 # NOTES: Shared character sets, caches, lightweight validation, progress helpers, and small formatting utilities.
 # =========================
 
@@ -113,7 +113,7 @@ def truncatePrefix(v, n):
 
 # =========================
 # Deterministic RNG engine
-# Build Version: 58C
+# Build Version: 58A
 # NOTES: Python-compatible MT19937-style deterministic random generator used by digit-series transforms.
 # =========================
 
@@ -232,7 +232,7 @@ class DeterministicRng32:
 
 # =========================
 # Permutation and obfuscation machinery
-# Build Version: 58C
+# Build Version: 58A
 # NOTES: Hex parsing, seed derivation, deterministic permutation, and progress-aware wrappers for chunked payload mixing.
 # =========================
 
@@ -333,7 +333,7 @@ def deobfuscateProgress(obfText, keyHex, steps, baseLabel, done, total):
 
 # =========================
 # Chunking, byte conversion, and payload framing
-# Build Version: 58C
+# Build Version: 58A
 # NOTES: Raw byte sentinel helpers, chunk splitting, one-string tail packing/parsing, and per-message seed expansion.
 # =========================
 
@@ -495,7 +495,7 @@ def parseTail(tail):
 
 # =========================
 # Shared transforms and state diffusion
-# Build Version: 58C
+# Build Version: 58A
 # NOTES: Common transforms used by the derivation path and the encryption/decryption path.
 # =========================
 
@@ -812,9 +812,10 @@ def deriveBaseFactor(hex64):
     if n < 4096: return n
     if n % 2 == 0: return int(s4[:-1]) + (100 if len(s4) > 1 and s4[-2] == "0" else 0)
     return int(s4[1:]) + (100 if len(s4) > 1 and s4[1] == "0" else 0)
+
 # =========================
 # Hash-only key derivation and generation
-# Build Version: 58B
+# Build Version: 58A
 # NOTES: Functions unique to the personal-key hashing/generation path, plus deterministic standard and extended key generation.
 # =========================
 
@@ -1079,226 +1080,20 @@ def generateSeedSource():
     r.shuffle(s)
     return "".join(s)
 
-def normalizeSeedBytes(x):
+def normalizeSeedInput(x):
     if isinstance(x, int):
-        return str(x).encode("utf-16-le", errors="surrogatepass")
+        if x < 0:
+            raise ValueError("int input must be >= 0")
+        return encodeTextBlock(str(x))
     if isinstance(x, str):
-        return x.encode("utf-16-le", errors="surrogatepass")
+        return encodeTextBlock(x)
     if isinstance(x, (bytes, bytearray, memoryview)):
-        return bytes(x)
+        return encodeSentinel(bytes(x))
     raise TypeError("unsupported input type")
 
-def normalizeSeedInput(x):
-    return encodeSentinel(normalizeSeedBytes(x))
-
-def computeKeyDigestStream(b, directBits=256, laneBits=336, blockBytes=4096):
-    raw = bytes(b)
-    directBytes = max(1, (int(directBits) + 7) // 8)
-    laneBytes = max(directBytes + 1, (int(laneBits) + 7) // 8)
-    blockBytes = max(laneBytes, int(blockBytes))
-
-    if len(raw) <= directBytes:
-        return computeKeyDigest(encodeSentinel(raw))[0].lower()
-
-    totalLen = len(raw)
-    head = raw[:directBytes]
-    headDigest = computeKeyDigest(encodeSentinel(head))[0].lower()
-
-    state = computeBound(
-        fold64(
-            "SHEP58A|KEY|STREAM|ROOT|"
-            + str(directBits) + "|"
-            + str(laneBits) + "|"
-            + str(totalLen) + "|"
-            + headDigest
-        )
-    )[0].lower()
-
-    laneIndex = 0
-
-    for blockOff in range(0, totalLen, blockBytes):
-        block = raw[blockOff:blockOff + blockBytes]
-
-        blockState = fold64(
-            "SHEP58A|KEY|STREAM|BLOCK|"
-            + state + "|"
-            + str(blockOff) + "|"
-            + str(len(block)) + "|"
-            + str(totalLen)
-        )
-
-        for innerOff in range(0, len(block), laneBytes):
-            lane = block[innerOff:innerOff + laneBytes]
-            laneHex = encodeHex(encodeSentinel(lane))
-
-            frameA = fold64(
-                "SHEP58A|KEY|STREAM|LEAF|A|"
-                + blockState + "|"
-                + str(laneIndex) + "|"
-                + str(len(lane)) + "|"
-                + laneHex
-            )
-
-            frameB = fold64(
-                "SHEP58A|KEY|STREAM|LEAF|B|"
-                + state + "|"
-                + headDigest + "|"
-                + str(totalLen) + "|"
-                + str(laneIndex)
-            )
-
-            blockState = computeBound(
-                frameA
-                + frameB
-                + leftPad(laneIndex, 8)
-                + leftPad(len(lane), 5)
-                + leftPad(totalLen, 15)
-            )[0].lower()
-
-            laneIndex += 1
-
-        state = computeBound(
-            fold64(
-                "SHEP58A|KEY|STREAM|BLOCK|FINAL|"
-                + state + "|"
-                + blockState + "|"
-                + str(blockOff) + "|"
-                + str(len(block)) + "|"
-                + str(laneIndex)
-            )
-        )[0].lower()
-
-    finalA = fold64(
-        "SHEP58A|KEY|STREAM|FINAL|A|"
-        + state + "|"
-        + headDigest + "|"
-        + str(totalLen) + "|"
-        + str(laneIndex)
-    )
-
-    finalB = fold64(
-        "SHEP58A|KEY|STREAM|FINAL|B|"
-        + headDigest + "|"
-        + state + "|"
-        + str(directBits) + "|"
-        + str(laneBits) + "|"
-        + str(blockBytes)
-    )
-
-    return computeBound(
-        finalA
-        + finalB
-        + leftPad(totalLen, 15)
-        + leftPad(laneIndex, 8)
-    )[0].lower()
-
-def computeKeyDigestFile(path, directBits=256, laneBits=336, blockBytes=65536):
-    directBytes = max(1, (int(directBits) + 7) // 8)
-    laneBytes = max(directBytes + 1, (int(laneBits) + 7) // 8)
-    blockBytes = max(laneBytes, int(blockBytes))
-    totalLen = os.path.getsize(path)
-
-    with open(path, "rb") as fp:
-        if totalLen <= directBytes:
-            raw = fp.read()
-            return computeKeyDigest(encodeSentinel(raw))[0].lower()
-
-        head = fp.read(directBytes)
-        headDigest = computeKeyDigest(encodeSentinel(head))[0].lower()
-
-        state = computeBound(
-            fold64(
-                "SHEP58A|KEY|STREAM|ROOT|"
-                + str(directBits) + "|"
-                + str(laneBits) + "|"
-                + str(totalLen) + "|"
-                + headDigest
-            )
-        )[0].lower()
-
-        fp.seek(0)
-        laneIndex = 0
-        blockOff = 0
-
-        while True:
-            block = fp.read(blockBytes)
-            if not block:
-                break
-
-            blockState = fold64(
-                "SHEP58A|KEY|STREAM|BLOCK|"
-                + state + "|"
-                + str(blockOff) + "|"
-                + str(len(block)) + "|"
-                + str(totalLen)
-            )
-
-            for innerOff in range(0, len(block), laneBytes):
-                lane = block[innerOff:innerOff + laneBytes]
-                laneHex = encodeHex(encodeSentinel(lane))
-
-                frameA = fold64(
-                    "SHEP58A|KEY|STREAM|LEAF|A|"
-                    + blockState + "|"
-                    + str(laneIndex) + "|"
-                    + str(len(lane)) + "|"
-                    + laneHex
-                )
-
-                frameB = fold64(
-                    "SHEP58A|KEY|STREAM|LEAF|B|"
-                    + state + "|"
-                    + headDigest + "|"
-                    + str(totalLen) + "|"
-                    + str(laneIndex)
-                )
-
-                blockState = computeBound(
-                    frameA
-                    + frameB
-                    + leftPad(laneIndex, 8)
-                    + leftPad(len(lane), 5)
-                    + leftPad(totalLen, 15)
-                )[0].lower()
-
-                laneIndex += 1
-
-            state = computeBound(
-                fold64(
-                    "SHEP58A|KEY|STREAM|BLOCK|FINAL|"
-                    + state + "|"
-                    + blockState + "|"
-                    + str(blockOff) + "|"
-                    + str(len(block)) + "|"
-                    + str(laneIndex)
-                )
-            )[0].lower()
-
-            blockOff += len(block)
-
-    finalA = fold64(
-        "SHEP58A|KEY|STREAM|FINAL|A|"
-        + state + "|"
-        + headDigest + "|"
-        + str(totalLen) + "|"
-        + str(laneIndex)
-    )
-
-    finalB = fold64(
-        "SHEP58A|KEY|STREAM|FINAL|B|"
-        + headDigest + "|"
-        + state + "|"
-        + str(directBits) + "|"
-        + str(laneBits) + "|"
-        + str(blockBytes)
-    )
-
-    return computeBound(
-        finalA
-        + finalB
-        + leftPad(totalLen, 15)
-        + leftPad(laneIndex, 8)
-    )[0].lower()
+def generatePrimaryKey(x=None):
+    seedInput = normalizeSeedInput(generateSeedSource() if x is None else x)
+    return computeKeyDigest(seedInput)[0].lower()
 
 def bindState(trace, modeId="32"):
     parts = [
@@ -1385,34 +1180,17 @@ def computeTraceExtended(trace, count=8):
     pepper = deriveInjection(trace, body, count, "333|LOTTERY2", rebound)
     return distributeSymbols(body, pepper, count)
 
-def generatePrimaryKey(x=None, directBits=256, laneBits=336, blockBytes=4096):
-    source = generateSeedSource() if x is None else x
-    raw = normalizeSeedBytes(source)
-    return computeKeyDigestStream(raw, directBits, laneBits, blockBytes)
-
-def generateExtendedKey(x=None, count=8, directBits=256, laneBits=336, blockBytes=4096):
-    source = generateSeedSource() if x is None else x
-    raw = normalizeSeedBytes(source)
-
-    directBytes = max(1, (int(directBits) + 7) // 8)
-    if len(raw) <= directBytes:
-        trace = traceWideState(encodeSentinel(raw))
-        return computeTraceExtended(trace, count)
-
-    streamRoot = computeKeyDigestStream(raw, directBits, laneBits, blockBytes)
-    trace = traceWideState(encodeTextBlock(streamRoot))
+def generateExtendedKey(x=None, count=8):
+    seedInput = normalizeSeedInput(generateSeedSource() if x is None else x)
+    trace = traceWideState(seedInput)
     return computeTraceExtended(trace, count)
 
-def generateKey(x=None, mode=0, count=8, directBits=256, laneBits=336, blockBytes=4096):
-    return generatePrimaryKey(x, directBits, laneBits, blockBytes) if int(mode) == 0 else generateExtendedKey(x, count, directBits, laneBits, blockBytes)
-
-def generateKeyFile(path, mode=0, count=8, directBits=256, laneBits=336, blockBytes=65536):
-    root = computeKeyDigestFile(path, directBits, laneBits, blockBytes)
-    return root if int(mode) == 0 else computeTraceExtended(traceWideState(encodeTextBlock(root)), count)
+def generateKey(x=None, mode=0, count=8):
+    return generatePrimaryKey(x) if int(mode) == 0 else generateExtendedKey(x, count)
 
 # =========================
 # Encryption and decryption
-# Build Version: 58C
+# Build Version: 58A
 # NOTES: Deterministic key normalization, one-string randomized envelope, strict authentication, and chunked encryption/decryption.
 # =========================
 
@@ -1656,4 +1434,5 @@ def decryptData(n, k, keyMode=None, count=8):
         rawBytes = rawBytes[:meta["origLen"]]
     return decodeSafeText(rawBytes)
 
-generateKey("")
+for i in range(100):
+    print(generateKey(-i, 1))

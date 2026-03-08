@@ -1,7 +1,7 @@
 
 # =========================
 # Main imports and runtime
-# Build Version: 58C
+# Build Version: 57C
 # NOTES: Standard-library dependencies required for transforms, progress output, compression, and deterministic RNG support.
 # =========================
 
@@ -9,7 +9,7 @@ import math, os, sys, time, zlib
 
 # =========================
 # Core constants and general helpers
-# Build Version: 58C
+# Build Version: 57C
 # NOTES: Shared character sets, caches, lightweight validation, progress helpers, and small formatting utilities.
 # =========================
 
@@ -24,7 +24,7 @@ gSepBase = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 gTailSpec = {
     "ver": 2,
-    "mode": 3,
+    "mode": 2,
     "suite": 2,
     "kdf": 2,
     "mac": 2,
@@ -113,7 +113,7 @@ def truncatePrefix(v, n):
 
 # =========================
 # Deterministic RNG engine
-# Build Version: 58C
+# Build Version: 57C
 # NOTES: Python-compatible MT19937-style deterministic random generator used by digit-series transforms.
 # =========================
 
@@ -232,7 +232,7 @@ class DeterministicRng32:
 
 # =========================
 # Permutation and obfuscation machinery
-# Build Version: 58C
+# Build Version: 57C
 # NOTES: Hex parsing, seed derivation, deterministic permutation, and progress-aware wrappers for chunked payload mixing.
 # =========================
 
@@ -305,6 +305,7 @@ def obfuscateProgress(text, keyHex, steps, baseLabel, done, total):
     if steps != 64:
         _printProg(baseLabel, done + 1, total)
         return obfuscate(text, keyHex)
+
     _printProg(baseLabel, done + 1, total)
     seeds = deriveSeeds(keyHex, steps)
     t = text
@@ -320,6 +321,7 @@ def deobfuscateProgress(obfText, keyHex, steps, baseLabel, done, total):
     if steps != 64:
         _printProg(baseLabel, done + 1, total)
         return deobfuscate(obfText, keyHex)
+
     _printProg(baseLabel, done + 1, total)
     seeds = deriveSeeds(keyHex, steps)
     t = obfText
@@ -333,7 +335,7 @@ def deobfuscateProgress(obfText, keyHex, steps, baseLabel, done, total):
 
 # =========================
 # Chunking, byte conversion, and payload framing
-# Build Version: 58C
+# Build Version: 57C
 # NOTES: Raw byte sentinel helpers, chunk splitting, one-string tail packing/parsing, and per-message seed expansion.
 # =========================
 
@@ -349,6 +351,14 @@ def decodeSentinel(n):
         raise ValueError("byte sentinel missing")
     return b[1:]
 
+def _chunkBytes(b, chunkSize=2048):
+    if chunkSize <= 0:
+        raise ValueError("chunkSize must be > 0")
+    b = bytes(b)
+    if not b:
+        return [b""]
+    return [b[i:i + chunkSize] for i in range(0, len(b), chunkSize)]
+
 def recoverSentinel(n):
     b = n.to_bytes((n.bit_length() + 7) // 8, "big")
     if not b:
@@ -361,14 +371,6 @@ def recoverSentinel(n):
     if i < len(b) and b[i] == 1:
         return b[i + 1:]
     return b[1:] if len(b) > 1 else b
-
-def splitByteBlocks(b, chunkSize=2048):
-    if chunkSize <= 0:
-        raise ValueError("chunkSize must be > 0")
-    b = bytes(b)
-    if not b:
-        return [b""]
-    return [b[i:i + chunkSize] for i in range(0, len(b), chunkSize)]
 
 def verifyZlib(b):
     if len(b) < 2:
@@ -494,19 +496,163 @@ def parseTail(tail):
     }
 
 # =========================
-# Shared transforms and state diffusion
-# Build Version: 58C
-# NOTES: Common transforms used by the derivation path and the encryption/decryption path.
+# Encoding/Decoding functions
+# Build Version: 57C
+# NOTES: Functions used only by the encryption/decryption path.
 # =========================
 
-def encodeTextBlock(t):
-    b = b"\x01" + str(t).encode("utf-16-le", errors="surrogatepass")
+def verifyEqual(a, b):
+    a = "" if a is None else str(a)
+    b = "" if b is None else str(b)
+    x = len(a) ^ len(b)
+    m = max(len(a), len(b))
+    for i in range(m):
+        ca = ord(a[i]) if i < len(a) else 0
+        cb = ord(b[i]) if i < len(b) else 0
+        x |= ca ^ cb
+    return x == 0
+
+def deriveMessageKeys(masterHex, saltHex, nonceHex, ivHex):
+    leftSeed = fold64(masterHex + saltHex + nonceHex + ivHex)
+    rightSeed = fold64(ivHex + nonceHex + saltHex + masterHex)
+    encRoot = computeBound(leftSeed + rightSeed)[0].lower()
+    authRoot = computeBound(rightSeed + leftSeed)[0].lower()
+    return encRoot, authRoot
+
+def deriveBlockKey(encRoot, chunkIndex, saltHex, nonceHex, ivHex):
+    counterHex = encodeHex(int(chunkIndex)).zfill(16)[-16:]
+    roundSeed = fold64(encRoot + saltHex + nonceHex + ivHex + counterHex)
+    return computeBound(roundSeed + encRoot + counterHex)[0].lower()
+
+def computeAuthTag(authRoot, meta, sep, body):
+    lens = meta["lens"]
+    header = "|".join([
+        str(meta["ver"]),
+        str(meta["mode"]),
+        str(meta["suite"]),
+        str(meta["kdfId"]),
+        str(meta["macId"]),
+        str(meta["flags"]),
+        str(meta["chunkSize"]),
+        str(meta["origLen"]),
+        str(meta["compLen"]),
+        str(len(lens)),
+        ",".join(str(x) for x in lens),
+        str(meta["msgSeedDec"]),
+        str(sep),
+    ])
+    chain = computeBound(fold64(authRoot + header))[0].lower()
+    stride = 256
+    blockIndex = 0
+    for off in range(0, len(body), stride):
+        block = body[off:off + stride]
+        blockHex = encodeHex(toBytes(block))
+        idxHex = encodeHex(blockIndex).zfill(8)
+        lenHex = encodeHex(len(block)).zfill(8)
+        chain = computeBound(fold64(chain + authRoot + idxHex + lenHex + blockHex))[0].lower()
+        blockIndex += 1
+    return computeBound(fold64(chain + authRoot + encodeHex(blockIndex).zfill(8)))[0].lower()
+
+def recoverSequence(s, c):
+    state = str(s)
+    keystream = generateKeystream(c, len(state))
+    out = []
+    for left, mask in zip(state, keystream):
+        out.append(chr(((ord(left) - ord(mask)) % 10) + 48))
+    return "".join(out)
+
+def interleaveStreams(s):
+    state = str(s)
+    if len(state) & 1:
+        core = state[:-1]
+        tail = state[-1]
+    else:
+        core = state
+        tail = ""
+    half = len(core) // 2
+    left = core[:half]
+    right = core[half:]
+    out = []
+    for a, b in zip(left, right):
+        out.append(a)
+        out.append(b)
+    return "".join(out) + tail
+
+def separateStreams(s):
+    state = str(s)
+    if len(state) & 1:
+        core = state[:-1]
+        tail = state[-1]
+    else:
+        core = state
+        tail = ""
+    even = []
+    odd = []
+    for idx, ch in enumerate(core):
+        if (idx & 1) == 0:
+            even.append(ch)
+        else:
+            odd.append(ch)
+    return "".join(even) + "".join(odd) + tail
+
+def executeForward(n, keys, b):
+    for key in keys:
+        n = partitionKey(n, key, 1)
+        n = decodeShift(str(diffuseSequence(str(n), key)), 10)
+        n = distributeRadix(int(n), key, b, 1)
+        n = diffuseBits(n, str(key))
+        if int(str(key)[0]) % 2 == 1: n = int(interleaveStreams(str(n)))
+    return n
+
+def executeInverse(n, keys, b):
+    for key in reversed(keys):
+        if int(str(key)[0]) % 2 == 1: n = int(separateStreams(str(n)))
+        n = diffuseBits(n, str(key))
+        n = encodeShift(distributeRadix(int(n), key, b, 0), 10)
+        n = recoverSequence(n, key)
+        n = partitionKey(int(n), key, 0)
+    return n
+
+def encryptBlock(nInt, hKey):
+    e = deriveBaseFactor(hKey)
+    key0 = decodeShift(hKey, 16)
+    b = e
+    keys = [key0]
+    key = key0
+    for _ in range(9):
+        key = int(processKey(key))
+        keys.append(key)
+    nInt = nInt + (key // b)
+    nInt = executeForward(nInt, keys, b)
+    return encodeShift(nInt, 62)
+
+def decryptBlock(cText, hKey):
+    e = deriveBaseFactor(hKey)
+    key0 = decodeShift(hKey, 16)
+    b = e
+    nInt = decodeShift(cText, 62)
+    keys = [key0]
+    key = key0
+    for _ in range(9):
+        key = int(processKey(key))
+        keys.append(key)
+    nInt = executeInverse(nInt, keys, b)
+    nInt = nInt - (key // b)
+    return nInt
+
+# =========================
+# Shared functions
+# Build Version: 57C
+# NOTES: Common transforms used by both the hash-key derivation path and the encryption/decryption path.
+# =========================
+
+def toBytes(t):
+    b = b"\x01" + t.encode("utf-16-le", errors="surrogatepass")
     return int.from_bytes(b, "big")
 
-def decodeTextBlock(n):
+def fromBytes(n):
     b = n.to_bytes((n.bit_length() + 7) // 8, "big")
-    if not b or b[0] != 1:
-        raise ValueError("byte sentinel missing")
+    if not b or b[0] != 1: raise ValueError("byte sentinel missing")
     return b[1:].decode("utf-16-le", errors="surrogatepass")
 
 def computeRadixDigits(val, b):
@@ -522,27 +668,23 @@ def computeRadixDigits(val, b):
             out = []
             for _ in range(targetLen): out.append(str(v % b)); v //= b
             return out[::-1]
-        half = targetLen // 2
-        divisor = b ** half
+        half = targetLen // 2; divisor = b ** half
         upperVal, lowerVal = divmod(v, divisor)
         return convert(upperVal, targetLen - half) + convert(lowerVal, half)
     res = convert(val, n)
     while len(res) > 1 and res[0] == "0": res.pop(0)
     return res
 
-def encodeRadixStream(n, b):
-    return " ".join(computeRadixDigits(n, b))
+def anyBase(n, b): return " ".join(computeRadixDigits(n, b))
 
-def decodeRadixStream(n, b):
+def fromAnyBase(n, b):
     parts = extractTokens(n) if isinstance(n, str) else n
-    if not parts:
-        return 0
+    if not parts: return 0
     ints = [int(p) for p in parts]
     def evalRange(start, end):
         if end - start <= 200:
             res = 0
-            for i in range(start, end):
-                res = res * b + ints[i]
+            for i in range(start, end): res = res * b + ints[i]
             return res
         mid = (start + end) // 2
         return evalRange(start, mid) * (b ** (end - mid)) + evalRange(mid, end)
@@ -601,14 +743,6 @@ def diffuseSequence(s, c):
         out.append(chr(((ord(left) + ord(mask) - 96) % 10) + 48))
     return "".join(out)
 
-def recoverSequence(s, c):
-    state = str(s)
-    keystream = generateKeystream(c, len(state))
-    out = []
-    for left, mask in zip(state, keystream):
-        out.append(chr(((ord(left) - ord(mask)) % 10) + 48))
-    return "".join(out)
-
 def permutePrefix(s): return s[5:] + s[2:5][::-1] + s[:2]
 def permuteSuffix(s): return s[-2:] + s[-5:-2][::-1] + s[:-5]
 
@@ -654,8 +788,7 @@ def distributeRadix(n, k, b=8, y=1):
     seedBase = 2 ** 16
     stateDigits = computeRadixDigits(n, b)
     schedule = [x for x in computeRadixDigits(k, seedBase) if 2 <= len(x) <= 10]
-    if not schedule:
-        schedule = [str((k % (seedBase - 2)) + 2)]
+    if not schedule: schedule = [str((k % (seedBase - 2)) + 2)]
     limit = (len(stateDigits) + 2) * 40
     need = len(stateDigits) + 1 if y == 1 else len(stateDigits)
     loops = 0
@@ -663,51 +796,15 @@ def distributeRadix(n, k, b=8, y=1):
         nextSeed = int(schedule[-1]) + seedBase
         schedule.extend(x for x in computeRadixDigits(nextSeed, seedBase) if 2 <= len(x) <= 10)
         loops += 1
-        if loops > limit:
-            break
-    if len(schedule) < need:
-        schedule.extend([schedule[-1]] * (need - len(schedule)))
+        if loops > limit: break
+    if len(schedule) < need: schedule.extend([schedule[-1]] * (need - len(schedule)))
     if y == 1:
         guard = (1 - (int(schedule[0]) % b)) % b
         stateDigits = [str(guard)] + stateDigits
         mixed = [str((int(a) + int(z)) % b) for a, z in zip(stateDigits, schedule)]
-        return decodeRadixStream(mixed, b)
+        return fromAnyBase(mixed, b)
     mixed = [str((int(a) - int(z)) % b) for a, z in zip(stateDigits, schedule)]
-    return 0 if len(mixed) <= 1 else decodeRadixStream(mixed[1:], b)
-
-def interleaveStreams(s):
-    state = str(s)
-    if len(state) & 1:
-        core = state[:-1]
-        tail = state[-1]
-    else:
-        core = state
-        tail = ""
-    half = len(core) // 2
-    left = core[:half]
-    right = core[half:]
-    out = []
-    for a, b in zip(left, right):
-        out.append(a)
-        out.append(b)
-    return "".join(out) + tail
-
-def separateStreams(s):
-    state = str(s)
-    if len(state) & 1:
-        core = state[:-1]
-        tail = state[-1]
-    else:
-        core = state
-        tail = ""
-    even = []
-    odd = []
-    for idx, ch in enumerate(core):
-        if (idx & 1) == 0:
-            even.append(ch)
-        else:
-            odd.append(ch)
-    return "".join(even) + "".join(odd) + tail
+    return 0 if len(mixed) <= 1 else fromAnyBase(mixed[1:], b)
 
 def decodeDigit(ch):
     return ord(ch) - 48
@@ -766,22 +863,7 @@ def integratePi(n, p):
     return str(acc)[-p:]
 
 def executeCascade(state, key, width):
-    return prefixProduct(
-        biasTransform(
-            prefixSquare(
-                digitProduct(
-                    integratePi(state, width),
-                    key,
-                    width
-                ),
-                key,
-                width
-            ),
-            width
-        ),
-        key,
-        width
-    )
+    return prefixProduct(biasTransform(prefixSquare(digitProduct(integratePi(state, width), key, width), key, width), width), key, width)
 
 def processKey(n, m=0):
     state = str(n)
@@ -812,10 +894,11 @@ def deriveBaseFactor(hex64):
     if n < 4096: return n
     if n % 2 == 0: return int(s4[:-1]) + (100 if len(s4) > 1 and s4[-2] == "0" else 0)
     return int(s4[1:]) + (100 if len(s4) > 1 and s4[1] == "0" else 0)
+
 # =========================
 # Hash-only key derivation and generation
-# Build Version: 58B
-# NOTES: Functions unique to the personal-key hashing/generation path, plus deterministic standard and extended key generation.
+# Build Version: 57C
+# NOTES: Functions unique to the personal-key hashing/generation path, plus deterministic SHEP32/SHEP333 generation.
 # =========================
 
 def traceWideState(n, i=10):
@@ -1031,7 +1114,10 @@ def computeBound(hexStr):
     l = int(h[-4:], 16) if len(h) >= 4 else int(h, 16)
     seedVal = ((f >> 8) ^ (l & 0xFF) ^ (f & 0xFF) ^ (l >> 8)) & 0xFF
 
-    h2 = "0" + h if len(h) & 1 else h
+    if len(h) & 1:
+        h2 = "0" + h
+    else:
+        h2 = h
 
     parts = []
     for i in range(0, len(h2), 2):
@@ -1050,255 +1136,40 @@ def computeBound(hexStr):
     s = fold64(h + mh + splitHex)
     return s, deriveBaseFactor(s)
 
-def compressKey(n, width=78):
+def getKey(n, x=78):
     while True:
         n = (n // 8) + int(integratePi(str(n // 5), len(str(n))))
         s = str(n)
-        if len(s) <= width:
-            return s
+        if len(s) <= x: return s
 
-def deriveKeyState(n):
-    seedState = validateState(n + 90, (n % 7) + 1)
-    compactState = compressKey(seedState, 79)
-    diffusedState = diffuseSequence(compactState, n)
-    decodedState = decodeShift(diffusedState, 10)
-    return diffuseKey(decodedState)
+def fetchKey(n):
+    return diffuseKey(decodeShift(diffuseSequence(getKey(validateState(n + 90, (n % 7) + 1), 79), n), 10))
 
-def computeKeyDigest(n):
-    chainA = deriveKeyState(n)
-    a = int(chainA + hex(n)[2:], 16)
-    chainB = deriveKeyState(a)
-    return computeBound(chainB)
+def hashKey(n):
+    a = int(fetchKey(n) + hex(n)[2:], 16)
+    return computeBound(fetchKey(a))
 
-def generateSeedSource():
+def generatePKey(n=None):
+    if n is not None:
+        return hashKey(toBytes(str(n)))[0].lower()
     chars = deriveCharset(62)
     seedVal = int.from_bytes(os.urandom(32), "big") ^ time.time_ns()
     r = DeterministicRng32(seedVal)
     ln = r.randint(64, 256)
     s = [chars[r.boundValue(62)] for _ in range(ln)]
     r.shuffle(s)
-    return "".join(s)
+    base62 = "".join(s)
+    return hashKey(decodeShift(base62, 62))[0].lower()
 
-def normalizeSeedBytes(x):
+def normInput(x):
     if isinstance(x, int):
-        return str(x).encode("utf-16-le", errors="surrogatepass")
+        if x < 0: raise ValueError("int input must be >= 0")
+        return x
     if isinstance(x, str):
-        return x.encode("utf-16-le", errors="surrogatepass")
+        return toBytes(x)
     if isinstance(x, (bytes, bytearray, memoryview)):
-        return bytes(x)
+        return encodeSentinel(bytes(x))
     raise TypeError("unsupported input type")
-
-def normalizeSeedInput(x):
-    return encodeSentinel(normalizeSeedBytes(x))
-
-def computeKeyDigestStream(b, directBits=256, laneBits=336, blockBytes=4096):
-    raw = bytes(b)
-    directBytes = max(1, (int(directBits) + 7) // 8)
-    laneBytes = max(directBytes + 1, (int(laneBits) + 7) // 8)
-    blockBytes = max(laneBytes, int(blockBytes))
-
-    if len(raw) <= directBytes:
-        return computeKeyDigest(encodeSentinel(raw))[0].lower()
-
-    totalLen = len(raw)
-    head = raw[:directBytes]
-    headDigest = computeKeyDigest(encodeSentinel(head))[0].lower()
-
-    state = computeBound(
-        fold64(
-            "SHEP58A|KEY|STREAM|ROOT|"
-            + str(directBits) + "|"
-            + str(laneBits) + "|"
-            + str(totalLen) + "|"
-            + headDigest
-        )
-    )[0].lower()
-
-    laneIndex = 0
-
-    for blockOff in range(0, totalLen, blockBytes):
-        block = raw[blockOff:blockOff + blockBytes]
-
-        blockState = fold64(
-            "SHEP58A|KEY|STREAM|BLOCK|"
-            + state + "|"
-            + str(blockOff) + "|"
-            + str(len(block)) + "|"
-            + str(totalLen)
-        )
-
-        for innerOff in range(0, len(block), laneBytes):
-            lane = block[innerOff:innerOff + laneBytes]
-            laneHex = encodeHex(encodeSentinel(lane))
-
-            frameA = fold64(
-                "SHEP58A|KEY|STREAM|LEAF|A|"
-                + blockState + "|"
-                + str(laneIndex) + "|"
-                + str(len(lane)) + "|"
-                + laneHex
-            )
-
-            frameB = fold64(
-                "SHEP58A|KEY|STREAM|LEAF|B|"
-                + state + "|"
-                + headDigest + "|"
-                + str(totalLen) + "|"
-                + str(laneIndex)
-            )
-
-            blockState = computeBound(
-                frameA
-                + frameB
-                + leftPad(laneIndex, 8)
-                + leftPad(len(lane), 5)
-                + leftPad(totalLen, 15)
-            )[0].lower()
-
-            laneIndex += 1
-
-        state = computeBound(
-            fold64(
-                "SHEP58A|KEY|STREAM|BLOCK|FINAL|"
-                + state + "|"
-                + blockState + "|"
-                + str(blockOff) + "|"
-                + str(len(block)) + "|"
-                + str(laneIndex)
-            )
-        )[0].lower()
-
-    finalA = fold64(
-        "SHEP58A|KEY|STREAM|FINAL|A|"
-        + state + "|"
-        + headDigest + "|"
-        + str(totalLen) + "|"
-        + str(laneIndex)
-    )
-
-    finalB = fold64(
-        "SHEP58A|KEY|STREAM|FINAL|B|"
-        + headDigest + "|"
-        + state + "|"
-        + str(directBits) + "|"
-        + str(laneBits) + "|"
-        + str(blockBytes)
-    )
-
-    return computeBound(
-        finalA
-        + finalB
-        + leftPad(totalLen, 15)
-        + leftPad(laneIndex, 8)
-    )[0].lower()
-
-def computeKeyDigestFile(path, directBits=256, laneBits=336, blockBytes=65536):
-    directBytes = max(1, (int(directBits) + 7) // 8)
-    laneBytes = max(directBytes + 1, (int(laneBits) + 7) // 8)
-    blockBytes = max(laneBytes, int(blockBytes))
-    totalLen = os.path.getsize(path)
-
-    with open(path, "rb") as fp:
-        if totalLen <= directBytes:
-            raw = fp.read()
-            return computeKeyDigest(encodeSentinel(raw))[0].lower()
-
-        head = fp.read(directBytes)
-        headDigest = computeKeyDigest(encodeSentinel(head))[0].lower()
-
-        state = computeBound(
-            fold64(
-                "SHEP58A|KEY|STREAM|ROOT|"
-                + str(directBits) + "|"
-                + str(laneBits) + "|"
-                + str(totalLen) + "|"
-                + headDigest
-            )
-        )[0].lower()
-
-        fp.seek(0)
-        laneIndex = 0
-        blockOff = 0
-
-        while True:
-            block = fp.read(blockBytes)
-            if not block:
-                break
-
-            blockState = fold64(
-                "SHEP58A|KEY|STREAM|BLOCK|"
-                + state + "|"
-                + str(blockOff) + "|"
-                + str(len(block)) + "|"
-                + str(totalLen)
-            )
-
-            for innerOff in range(0, len(block), laneBytes):
-                lane = block[innerOff:innerOff + laneBytes]
-                laneHex = encodeHex(encodeSentinel(lane))
-
-                frameA = fold64(
-                    "SHEP58A|KEY|STREAM|LEAF|A|"
-                    + blockState + "|"
-                    + str(laneIndex) + "|"
-                    + str(len(lane)) + "|"
-                    + laneHex
-                )
-
-                frameB = fold64(
-                    "SHEP58A|KEY|STREAM|LEAF|B|"
-                    + state + "|"
-                    + headDigest + "|"
-                    + str(totalLen) + "|"
-                    + str(laneIndex)
-                )
-
-                blockState = computeBound(
-                    frameA
-                    + frameB
-                    + leftPad(laneIndex, 8)
-                    + leftPad(len(lane), 5)
-                    + leftPad(totalLen, 15)
-                )[0].lower()
-
-                laneIndex += 1
-
-            state = computeBound(
-                fold64(
-                    "SHEP58A|KEY|STREAM|BLOCK|FINAL|"
-                    + state + "|"
-                    + blockState + "|"
-                    + str(blockOff) + "|"
-                    + str(len(block)) + "|"
-                    + str(laneIndex)
-                )
-            )[0].lower()
-
-            blockOff += len(block)
-
-    finalA = fold64(
-        "SHEP58A|KEY|STREAM|FINAL|A|"
-        + state + "|"
-        + headDigest + "|"
-        + str(totalLen) + "|"
-        + str(laneIndex)
-    )
-
-    finalB = fold64(
-        "SHEP58A|KEY|STREAM|FINAL|B|"
-        + headDigest + "|"
-        + state + "|"
-        + str(directBits) + "|"
-        + str(laneBits) + "|"
-        + str(blockBytes)
-    )
-
-    return computeBound(
-        finalA
-        + finalB
-        + leftPad(totalLen, 15)
-        + leftPad(laneIndex, 8)
-    )[0].lower()
 
 def bindState(trace, modeId="32"):
     parts = [
@@ -1368,195 +1239,72 @@ def distributeSymbols(baseHexStr, sched, count=8):
             j += 1
     return "".join(out)
 
-def computeTraceDigest(trace):
+def finalizeDigest(trace):
     root = bindState(trace, "32|FINAL")
     a = fold64(root + truncatePrefix(trace["value"], 128))
     b = computeBound(a)[0].lower()
     c = fold64(b + root + truncatePrefix(trace["right"], 128))
     return c[:64]
 
-def computeTraceExtended(trace, count=8):
+def finalizeExtended(trace, count=8):
     root = bindState(trace, "333|ROOT")
-    bodyB = computeHex(trace, "333|BASE", root)
-    pepperB = deriveInjection(trace, bodyB, count, "333|LOTTERY", root)
-    raw = distributeSymbols(bodyB, pepperB, count)
-    rebound = fold64(root + raw + scheduleText(pepperB) + truncatePrefix(trace["first"], 96))
-    body = computeHex(trace, "333|BASE2", rebound)
-    pepper = deriveInjection(trace, body, count, "333|LOTTERY2", rebound)
-    return distributeSymbols(body, pepper, count)
+    body0 = computeHex(trace, "333|BASE", root)
+    sched0 = deriveInjection(trace, body0, count, "333|LOTTERY", root)
+    raw = distributeSymbols(body0, sched0, count)
+    rebound = fold64(root + raw + scheduleText(sched0) + truncatePrefix(trace["first"], 96))
+    body1 = computeHex(trace, "333|BASE2", rebound)
+    sched1 = deriveInjection(trace, body1, count, "333|LOTTERY2", rebound)
+    return distributeSymbols(body1, sched1, count)
 
-def generatePrimaryKey(x=None, directBits=256, laneBits=336, blockBytes=4096):
-    source = generateSeedSource() if x is None else x
-    raw = normalizeSeedBytes(source)
-    return computeKeyDigestStream(raw, directBits, laneBits, blockBytes)
+def generateShep(x, mode="32", count=8):
+    n = normInput(x)
+    trace = traceWideState(n)
+    if str(mode) == "32":
+        return finalizeDigest(trace)
+    if str(mode) == "333":
+        return finalizeExtended(trace, count)
+    raise ValueError("mode must be '32' or '333'")
 
-def generateExtendedKey(x=None, count=8, directBits=256, laneBits=336, blockBytes=4096):
-    source = generateSeedSource() if x is None else x
-    raw = normalizeSeedBytes(source)
+def passKey(text, mode="32", kdfId="shep"):
+    if kdfId != "shep":
+        raise ValueError("unsupported kdfId")
+    if str(mode) == "333":
+        return generateShep(text, "333")
+    return generatePKey(text).lower()
 
-    directBytes = max(1, (int(directBits) + 7) // 8)
-    if len(raw) <= directBytes:
-        trace = traceWideState(encodeSentinel(raw))
-        return computeTraceExtended(trace, count)
-
-    streamRoot = computeKeyDigestStream(raw, directBits, laneBits, blockBytes)
-    trace = traceWideState(encodeTextBlock(streamRoot))
-    return computeTraceExtended(trace, count)
-
-def generateKey(x=None, mode=0, count=8, directBits=256, laneBits=336, blockBytes=4096):
-    return generatePrimaryKey(x, directBits, laneBits, blockBytes) if int(mode) == 0 else generateExtendedKey(x, count, directBits, laneBits, blockBytes)
-
-def generateKeyFile(path, mode=0, count=8, directBits=256, laneBits=336, blockBytes=65536):
-    root = computeKeyDigestFile(path, directBits, laneBits, blockBytes)
-    return root if int(mode) == 0 else computeTraceExtended(traceWideState(encodeTextBlock(root)), count)
+def derivePepper(n, count=8):
+    return generateShep(n, "333", count)
 
 # =========================
-# Encryption and decryption
-# Build Version: 58C
+# Public encryption and decryption API
+# Build Version: 57C
 # NOTES: Deterministic key normalization, one-string randomized envelope, strict authentication, and chunked encryption/decryption.
 # =========================
 
-def verifyEqual(a, b):
-    a = "" if a is None else str(a)
-    b = "" if b is None else str(b)
-    x = len(a) ^ len(b)
-    m = max(len(a), len(b))
-    for i in range(m):
-        ca = ord(a[i]) if i < len(a) else 0
-        cb = ord(b[i]) if i < len(b) else 0
-        x |= ca ^ cb
-    return x == 0
-
-def deriveMessageKeys(masterHex, saltHex, nonceHex, ivHex):
-    leftSeed = fold64(masterHex + saltHex + nonceHex + ivHex)
-    rightSeed = fold64(ivHex + nonceHex + saltHex + masterHex)
-    encRoot = computeBound(leftSeed + rightSeed)[0].lower()
-    authRoot = computeBound(rightSeed + leftSeed)[0].lower()
-    return encRoot, authRoot
-
-def deriveBlockKey(encRoot, chunkIndex, saltHex, nonceHex, ivHex):
-    counterHex = encodeHex(int(chunkIndex)).zfill(16)[-16:]
-    roundSeed = fold64(encRoot + saltHex + nonceHex + ivHex + counterHex)
-    return computeBound(roundSeed + encRoot + counterHex)[0].lower()
-
-def computeAuthTag(authRoot, meta, sep, body):
-    lens = meta["lens"]
-    header = "|".join([
-        str(meta["ver"]),
-        str(meta["mode"]),
-        str(meta["suite"]),
-        str(meta["kdfId"]),
-        str(meta["macId"]),
-        str(meta["flags"]),
-        str(meta["chunkSize"]),
-        str(meta["origLen"]),
-        str(meta["compLen"]),
-        str(len(lens)),
-        ",".join(str(x) for x in lens),
-        str(meta["msgSeedDec"]),
-        str(sep),
-    ])
-    chain = computeBound(fold64(authRoot + header))[0].lower()
-    stride = 256
-    blockIndex = 0
-    for off in range(0, len(body), stride):
-        block = body[off:off + stride]
-        blockHex = encodeHex(encodeTextBlock(block))
-        idxHex = encodeHex(blockIndex).zfill(8)
-        lenHex = encodeHex(len(block)).zfill(8)
-        chain = computeBound(fold64(chain + authRoot + idxHex + lenHex + blockHex))[0].lower()
-        blockIndex += 1
-    return computeBound(fold64(chain + authRoot + encodeHex(blockIndex).zfill(8)))[0].lower()
-
-def executeForward(n, keys, b):
-    for key in keys:
-        n = partitionKey(n, key, 1)
-        n = decodeShift(str(diffuseSequence(str(n), key)), 10)
-        n = distributeRadix(int(n), key, b, 1)
-        n = diffuseBits(n, str(key))
-        if int(str(key)[0]) % 2 == 1:
-            n = int(interleaveStreams(str(n)))
-    return n
-
-def executeInverse(n, keys, b):
-    for key in reversed(keys):
-        if int(str(key)[0]) % 2 == 1:
-            n = int(separateStreams(str(n)))
-        n = diffuseBits(n, str(key))
-        n = encodeShift(distributeRadix(int(n), key, b, 0), 10)
-        n = recoverSequence(n, key)
-        n = partitionKey(int(n), key, 0)
-    return n
-
-def encryptBlock(nInt, hKey):
-    e = deriveBaseFactor(hKey)
-    key0 = decodeShift(hKey, 16)
-    b = e
-    keys = [key0]
-    key = key0
-    for _ in range(9):
-        key = int(processKey(key))
-        keys.append(key)
-    nInt = nInt + (key // b)
-    nInt = executeForward(nInt, keys, b)
-    return encodeShift(nInt, 62)
-
-def decryptBlock(cText, hKey):
-    e = deriveBaseFactor(hKey)
-    key0 = decodeShift(hKey, 16)
-    b = e
-    nInt = decodeShift(cText, 62)
-    keys = [key0]
-    key = key0
-    for _ in range(9):
-        key = int(processKey(key))
-        keys.append(key)
-    nInt = executeInverse(nInt, keys, b)
-    nInt = nInt - (key // b)
-    return nInt
-
-def isExtendedKey(k, count=8):
-    if not isinstance(k, str):
-        return False
-    if len(k) != 64 + int(count):
-        return False
-    valid = set(gCharBase)
-    return all(ch in valid for ch in k)
-
-def resolveKey(k, allowAuto=False, keyMode=0, count=8):
-    keyMode = int(keyMode)
-
+def modeKey(k, allowAuto=False):
     if k is None or k == 0 or (isinstance(k, str) and not k.strip()):
         if not allowAuto:
             raise ValueError("key/passphrase required")
-        return generateKey(None, keyMode, count), 0
+        return generatePKey().lower(), 0
+    if not isinstance(k, str):
+        raise ValueError("key/passphrase must be a string")
+    k = k.strip()
+    if isHex64(k):
+        return k.lower(), 0
+    return generatePKey(k).lower(), 1
 
-    if keyMode == 0:
-        if isinstance(k, str) and isHex64(k.strip()):
-            return k.strip().lower(), 0
-        return generatePrimaryKey(k), 1
-
-    if isinstance(k, str):
-        s = k.strip()
-        if isExtendedKey(s, count):
-            return s, 0
-    return generateExtendedKey(k, count), 1
-
-def encryptData(n, k=None, keyMode=0, count=8):
+def encryptData(n, k=0):
     if not isinstance(n, str):
         raise ValueError("encryptData expects a string")
 
-    keyMode = int(keyMode)
-    modeMarker = 0 if keyMode == 0 else 333
-
-    hKey, kdfId = resolveKey(k, True, keyMode, count)
+    hKey, kdfId = modeKey(k, True)
     msgSeedDec = deriveWrapSeed()
     saltHex, nonceHex, ivHex = expandSeedState(msgSeedDec)
     encRoot, authRoot = deriveMessageKeys(hKey, saltHex, nonceHex, ivHex)
 
     rawBytes = n.encode("utf-16-le", errors="surrogatepass")
     compBytes = zlib.compress(rawBytes, 9)
-    parts = splitByteBlocks(compBytes, 2048)
+    parts = _chunkBytes(compBytes, 2048)
 
     totalSteps = len(parts) + 3
     done = 0
@@ -1577,7 +1325,7 @@ def encryptData(n, k=None, keyMode=0, count=8):
 
     meta = {
         "ver": 1,
-        "mode": modeMarker,
+        "mode": 1,
         "suite": 1,
         "kdfId": kdfId,
         "macId": 0,
@@ -1590,33 +1338,16 @@ def encryptData(n, k=None, keyMode=0, count=8):
     }
 
     tagHex = computeAuthTag(authRoot, meta, sep, obfBody)
-    tail = loadTail(
-        meta["ver"],
-        meta["mode"],
-        meta["suite"],
-        meta["kdfId"],
-        meta["macId"],
-        meta["flags"],
-        meta["chunkSize"],
-        meta["origLen"],
-        meta["compLen"],
-        lens,
-        msgSeedDec,
-        tagHex
-    )
+    tail = loadTail(meta["ver"], meta["mode"], meta["suite"], meta["kdfId"], meta["macId"], meta["flags"], meta["chunkSize"], meta["origLen"], meta["compLen"], lens, msgSeedDec, tagHex)
     return obfBody + sep + tail, hKey
 
-def decryptData(n, k, keyMode=None, count=8):
+def decryptData(n, k):
     if not isinstance(n, str):
         raise ValueError("decryptData expects a string ciphertext")
 
+    hKey, _ = modeKey(k, False)
     obfBody, sep, tail = pruneTail(n)
     meta = parseTail(tail)
-
-    modeValue = meta["mode"] if keyMode is None else int(keyMode)
-    resolvedMode = 0 if int(modeValue) == 0 else 333
-    hKey, _ = resolveKey(k, False, resolvedMode, count)
-
     saltHex, nonceHex, ivHex = expandSeedState(meta["msgSeedDec"])
     encRoot, authRoot = deriveMessageKeys(hKey, saltHex, nonceHex, ivHex)
 
@@ -1627,7 +1358,6 @@ def decryptData(n, k, keyMode=None, count=8):
     totalSteps = len(meta["lens"]) + 3
     if totalSteps < 4:
         totalSteps = 4
-
     done = 0
     body = deobfuscateProgress(obfBody, hKey, 64, "DEC", done, totalSteps)
     done += 3
@@ -1656,4 +1386,5 @@ def decryptData(n, k, keyMode=None, count=8):
         rawBytes = rawBytes[:meta["origLen"]]
     return decodeSafeText(rawBytes)
 
-generateKey("")
+for i in range(5000):
+    print(generateShep(i, "333"))
