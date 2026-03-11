@@ -1,39 +1,21 @@
 # =========================
-# Main imports and runtime
-# Build Version: 41D
-
-# NOTES: Core standard-library dependencies, CLI support, and runtime integer configuration.
+# CLI imports and user-facing workflow
+# Build Version: 60D
+# NOTES: Argument parsing, key-file handling, file payload wrappers, range generation, signing helpers, and interactive command routing.
 # =========================
 
-import math, os, sys, time, zlib, json, difflib, argparse
+import argparse, difflib
 from pathlib import Path
 
-sys.set_int_max_str_digits(0)
+CLI_VERSION = "2.0.0"
 
-# =========================
-# CLI constants and file format markers
-
-# NOTES: Versioning, allowed extensions, key file wrappers, metadata framing bytes, and file-size guardrails.
-# =========================
-
-VERSION = "1.0.1"
-
-DOC_EXTS = {".pdf", ".doc", ".docx", ".txt", ".rtf", ".odt", ".md", ".csv", ".xls", ".xlsx", ".json", ".tsv"}
-ALLOWED_DEC_EXTS = {".shep32", ".sh3", ".sh32", ""}
-
-KEY_HEADER = "-----BEGIN SHEP32 KEY-----\n"
-KEY_FOOTER = "\n-----END SHEP32 KEY-----"
-
-META_HEADER = b"SHEP32FILEv1\n"
-META_DELIM = b"\n---\n"
-
+DOC_EXTS = {".pdf", ".doc", ".docx", ".txt", ".rtf", ".odt", ".md", ".csv", ".xls", ".xlsx", ".json", ".tsv", ".bin"}
+KEY_HEADER = "-----BEGIN SHEP KEY-----\n"
+KEY_FOOTER = "\n-----END SHEP KEY-----"
+FILE_MARKER = "__shep_file__"
 DEFAULT_MAX_BYTES = 1000 * 1024
-
-# =========================
-# CLI formatting, validation, and basic file helpers
-
-# NOTES: Error printing, hex cleanup, text/binary file access, key-file parsing/formatting, stdin payload reading, and extension/size validation.
-# =========================
+CHUNK_UNIT = 2048
+FIXED_COUNT = 8
 
 def printErr(msg):
     print(f"ERROR: {msg}", file=sys.stderr)
@@ -43,10 +25,6 @@ def isDirPath(p):
         return Path(p).exists() and Path(p).is_dir()
     except Exception:
         return False
-
-def sanitizeHex64(s):
-    t = "".join(ch for ch in str(s).lower().strip() if ch in "0123456789abcdef")
-    return t
 
 def readTextFile(path):
     return Path(path).read_text(encoding="utf-8", errors="replace")
@@ -60,40 +38,102 @@ def readBinFile(path):
 def writeBinFile(path, b):
     Path(path).write_bytes(b)
 
+def sanitizeKeyToken(s):
+    return str(s).strip()
+
+def isKeyToken(s, count=8):
+    if not isinstance(s, str):
+        return False
+    t = s.strip()
+    return isHex64(t) or isExtendedKey(t, count)
+
 def parseKeyFileText(text):
     t = text.strip().replace("\r\n", "\n")
-    if KEY_HEADER.strip() in t and KEY_FOOTER.strip() in t:
-        start = t.find(KEY_HEADER.strip())
-        end = t.find(KEY_FOOTER.strip(), start)
-        if start >= 0 and end > start:
-            mid = t[start:].split("\n", 1)[1]
-            mid = mid.split(KEY_FOOTER.strip(), 1)[0].strip()
-            if isHex64(mid):
-                return mid.lower()
+    wrappers = [
+        (KEY_HEADER.strip(), KEY_FOOTER.strip()),
+        ("-----BEGIN SHEP KEY-----", "-----END SHEP KEY-----"),
+        ("-----BEGIN SHEP64 KEY-----", "-----END SHEP64 KEY-----"),
+        ("-----BEGIN SHEP72 KEY-----", "-----END SHEP72 KEY-----"),
+    ]
+    for head, foot in wrappers:
+        if head in t and foot in t:
+            start = t.find(head)
+            end = t.find(foot, start)
+            if start >= 0 and end > start:
+                mid = t[start:].split("\n", 1)[1]
+                mid = mid.split(foot, 1)[0].strip()
+                if mid:
+                    return mid
     for line in t.splitlines():
-        s = sanitizeHex64(line)
-        if isHex64(s):
+        s = line.strip()
+        if s:
             return s
-    raise ValueError("Invalid .pkey format (expected header/footer with 64-hex inside, or a bare 64-hex line).")
+    raise ValueError("Invalid key file format.")
 
 def loadKeyFromFile(path):
     return parseKeyFileText(readTextFile(path))
 
-def formatKeyFile(hex64):
-    return f"{KEY_HEADER}{hex64.lower()}{KEY_FOOTER}"
+def formatKeyFile(token):
+    return f"{KEY_HEADER}{str(token).strip()}{KEY_FOOTER}"
 
-def writeKeyFile(path, hex64):
-    writeTextFile(path, formatKeyFile(hex64))
+def writeKeyFile(path, token):
+    writeTextFile(path, formatKeyFile(token))
 
 def validateFileCap(filePath, noLimit):
     size = Path(filePath).stat().st_size
     if (not noLimit) and size > DEFAULT_MAX_BYTES:
-        raise ValueError(f"File exceeds 1000KB limit ({size} bytes). Use --no-limit to override.")
+        raise ValueError(f"File exceeds {DEFAULT_MAX_BYTES} byte limit ({size} bytes). Use --no-limit to override.")
 
-def validateDecExtension(filePath, force):
-    ext = Path(filePath).suffix.lower()
-    if not force and ext not in ALLOWED_DEC_EXTS:
-        raise ValueError(f"Invalid decrypt extension '{ext}'. Allowed: .shep32 .sh3 .sh32 or no extension (use --force to override).")
+def resolveChunkBytes(chunkSize=None, chunkBytes=None, defaultUnits=1):
+    if chunkBytes is not None:
+        out = int(chunkBytes)
+    else:
+        units = defaultUnits if chunkSize is None else int(chunkSize)
+        out = int(units) * CHUNK_UNIT
+    if out < 1:
+        raise ValueError("Chunk size must be >= 1 byte.")
+    return out
+
+def makeProgress(label):
+    state = {"last": None}
+    def emit(done, total, stage=""):
+        total = max(1, int(total))
+        done = max(0, min(int(done), total))
+        pct = int((done * 100) / total)
+        sig = (pct, stage)
+        if state["last"] == sig and done < total:
+            return
+        state["last"] = sig
+        width = 32
+        fill = int((pct * width) / 100)
+        bar = "█" * fill + "·" * (width - fill)
+        extra = f"  {stage}" if stage else ""
+        sys.stdout.write(f"\r{label} [{bar}] {pct:3d}% {done}/{total}{extra}")
+        sys.stdout.flush()
+        if done >= total:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+    return emit
+
+def packFilePayload(filePath, dataBytes):
+    obj = {
+        FILE_MARKER: 1,
+        "name": Path(filePath).name,
+        "size": len(dataBytes),
+        "data": packPortableBytes(dataBytes),
+    }
+    return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+
+def unpackFilePayload(text):
+    try:
+        obj = json.loads(text)
+    except Exception:
+        return None
+    if not isinstance(obj, dict) or int(obj.get(FILE_MARKER, 0)) != 1:
+        return None
+    name = str(obj.get("name", "restored.bin"))
+    data = unpackPortableBytes(str(obj["data"]))
+    return name, data
 
 def readStdinPayload(delim=None):
     data = sys.stdin.read()
@@ -107,6 +147,16 @@ def readStdinPayload(delim=None):
         return data[a + len(start):b].strip()
     return data.rstrip("\n\r")
 
+def maybeLoadToken(value):
+    s = str(value).strip()
+    try:
+        p = Path(os.path.expanduser(os.path.expandvars(s)))
+        if p.exists() and p.is_file():
+            return readTextFile(p).strip()
+    except Exception:
+        pass
+    return s
+
 def resolveKeyFromArgs(args, require=False):
     provided = 0
     if getattr(args, "key", None): provided += 1
@@ -114,146 +164,58 @@ def resolveKeyFromArgs(args, require=False):
     if getattr(args, "keyfile", None): provided += 1
     if provided > 1:
         raise ValueError("Provide only one of: --key, --passphrase, --keyfile")
-
     if getattr(args, "keyfile", None):
         return loadKeyFromFile(args.keyfile)
-
     if getattr(args, "passphrase", None) is not None:
-        return generatePKey(args.passphrase).lower()
-
+        return args.passphrase
     if getattr(args, "key", None) is not None:
-        k = sanitizeHex64(args.key)
-        if not isHex64(k):
-            raise ValueError("--key must be exactly 64 hex characters")
-        return k
-
+        return sanitizeKeyToken(args.key)
     if require:
-        raise ValueError("A key source is required for decryption (--key, --passphrase, or --keyfile).")
-
-    return ""
+        raise ValueError("A key source is required.")
+    return None
 
 def emitJson(obj):
     print(json.dumps(obj, ensure_ascii=False))
 
-# =========================
-# CLI output path and naming helpers
-
-# NOTES: Default encrypted/decrypted output naming, directory-aware output routing, and restored filename selection.
-# =========================
-
-def defaultEncOutPath(inPath):
+def defaultEncOutPath(inPath, detached=False):
     p = Path(inPath)
-    outExt = ".sh3" if p.suffix.lower() in DOC_EXTS else ".shep32"
-    return str(p.with_suffix(outExt))
+    if detached:
+        base = p.with_suffix("")
+        return str(base) + ".body", str(base) + ".meta"
+    return str(p.with_suffix(".sh32"))
 
-def chooseEncOutPath(inPath, outArg):
+def chooseDetachedOutPaths(srcLabel, outArg):
     if not outArg:
-        return defaultEncOutPath(inPath)
+        return None, None
     if isDirPath(outArg):
-        p = Path(inPath)
-        outExt = ".sh3" if p.suffix.lower() in DOC_EXTS else ".shep32"
-        return str(Path(outArg) / (p.stem + outExt))
-    return str(outArg)
+        stem = Path(srcLabel).stem if srcLabel else "cipher"
+        return str(Path(outArg) / f"{stem}.body"), str(Path(outArg) / f"{stem}.meta")
+    base = str(outArg)
+    return base + ".body", base + ".meta"
+
+def chooseTextOutPath(outArg, defaultName="cipher.sh32"):
+    if not outArg:
+        return None
+    if isDirPath(outArg):
+        return str(Path(outArg) / defaultName)
+    p = Path(str(outArg))
+    if p.suffix == "":
+        return str(p.with_suffix(".sh32"))
+    return str(p)
 
 def chooseDecOutPath(srcPath, restoredName, outArg):
     if not outArg:
-        return str(Path(srcPath).with_name(restoredName))
+        return restoredName
     if isDirPath(outArg):
         return str(Path(outArg) / restoredName)
     return str(outArg)
 
-# =========================
-# File payload framing and raw byte transforms
 
-# NOTES: Structured file payload packing/unpacking and raw byte encryption/decryption wrappers that mirror the updated core pipeline.
-# =========================
-
-def packFilePayload(filePath, dataBytes):
-    p = Path(filePath)
-    name = p.stem
-    ext = p.suffix
-    sizeStr = str(len(dataBytes)).encode("utf-8")
-    header = META_HEADER + name.encode("utf-8", errors="strict") + b"\n" + ext.encode("utf-8", errors="strict") + b"\n" + sizeStr + META_DELIM
-    return header + dataBytes
-
-def unpackFilePayload(payloadBytes):
-    if not payloadBytes.startswith(META_HEADER):
-        return None
-    try:
-        idx = payloadBytes.find(META_DELIM)
-        if idx < 0:
-            return None
-        head = payloadBytes[:idx + len(META_DELIM)]
-        rest = payloadBytes[idx + len(META_DELIM):]
-        lines = head.decode("utf-8", errors="strict").split("\n")
-        if len(lines) < 4:
-            return None
-        name = lines[1]
-        ext = lines[2]
-        sizeStr = lines[3].strip()
-        _ = int(sizeStr)
-        return (name + ext), rest
-    except Exception:
-        return None
-
-def toBytesRaw(dataBytes):
-    if not isinstance(dataBytes, (bytes, bytearray)):
-        raise TypeError("toBytesRaw expects bytes")
-    b = b"\x01" + bytes(dataBytes)
-    return int.from_bytes(b, "big")
-
-def fromBytesRaw(n):
-    b = n.to_bytes((n.bit_length() + 7) // 8, "big")
-    if not b or b[0] != 1:
-        raise ValueError("byte sentinel missing")
-    return b[1:]
-
-def encryptBytes(dataBytes, keyHexOrZero=0):
-    n = toBytesRaw(dataBytes)
-    if keyHexOrZero:
-        if not isHex64(keyHexOrZero):
-            raise ValueError("personalKey must be exactly 64 hex digits")
-        hKey = str(keyHexOrZero).lower()
-        e = getE(hKey)
-    else:
-        hKey, e = hashKey(n)
-    key0 = tDecimal(hKey, 16)
-    b = e
-
-    keys = [key0]
-    key = key0
-    for _ in range(9):
-        key = int(processKey(key))
-        keys.append(key)
-
-    n = n + (key // b)
-    n = pData(n, keys, b)
-    return fDecimal(n, 62), hKey
-
-def decryptBytes(cipherStr, keyHex):
-    if not isHex64(keyHex):
-        raise ValueError("personalKey must be exactly 64 hex digits")
-    k = keyHex.lower()
-    e = getE(k)
-    key0 = tDecimal(k, 16)
-    b = e
-    n = tDecimal(cipherStr, 62)
-
-    keys = [key0]
-    key = key0
-    for _ in range(9):
-        key = int(processKey(key))
-        keys.append(key)
-
-    n = dData(n, keys, b)
-    n = n - (key // b)
-    return fromBytesRaw(n)
-
-# =========================
-# Path normalization and discovery helpers
-
-# NOTES: User path cleanup, existence checks, fallback path variants, bounded filesystem walking, and fuzzy suggestion ranking for wizard recovery.
-# =========================
+def defaultKeyOutPath(cipherPath):
+    p = Path(cipherPath)
+    if p.suffix:
+        return str(p.with_suffix(".pkey"))
+    return str(Path(str(p) + ".pkey"))
 
 def normUserPath(s):
     if s is None:
@@ -261,9 +223,7 @@ def normUserPath(s):
     s = str(s).strip()
     if not s:
         return ""
-    s = os.path.expandvars(s)
-    s = os.path.expanduser(s)
-    return s
+    return os.path.expanduser(os.path.expandvars(s))
 
 def existingFile(p):
     try:
@@ -283,31 +243,18 @@ def tryPathVariants(rawPath):
     rawPath = normUserPath(rawPath)
     if not rawPath:
         return []
-
     p = Path(rawPath)
-
-    variants = []
-
-    variants.append(p)
-
+    variants = [p]
     if not p.is_absolute():
         variants.append(Path.cwd() / p)
-
-    home = Path.home()
-    if not p.is_absolute():
-        variants.append(home / p)
-        
+        variants.append(Path.home() / p)
     seen = set()
     out = []
     for v in variants:
-        try:
-            key = str(v)
-        except Exception:
-            continue
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(v)
+        k = str(v)
+        if k not in seen:
+            seen.add(k)
+            out.append(v)
     return out
 
 def firstExistingFile(rawPath):
@@ -317,26 +264,20 @@ def firstExistingFile(rawPath):
     return None
 
 def bestEffortSearchRoots():
-    roots = []
-    roots.append(Path.cwd())
-    roots.append(Path.home())
-
+    roots = [Path.cwd(), Path.home()]
     mnt = Path("/mnt")
     if mnt.exists() and mnt.is_dir():
         roots.append(mnt)
-
-    seen = set()
     out = []
+    seen = set()
     for r in roots:
         try:
             rr = r.resolve()
         except Exception:
             rr = r
         k = str(rr)
-        if k in seen:
-            continue
-        seen.add(k)
-        if rr.exists() and rr.is_dir():
+        if k not in seen and rr.exists() and rr.is_dir():
+            seen.add(k)
             out.append(rr)
     return out
 
@@ -348,15 +289,11 @@ def _walkLimited(root, maxDepth=6, maxFiles=40000):
     rootParts = len(root.parts)
     filesSeen = 0
     for dirpath, dirnames, filenames in os.walk(root):
-        try:
-            d = Path(dirpath)
-            depth = len(d.parts) - rootParts
-            if depth > maxDepth:
-                dirnames[:] = []
-                continue
-        except Exception:
+        d = Path(dirpath)
+        depth = len(d.parts) - rootParts
+        if depth > maxDepth:
+            dirnames[:] = []
             continue
-
         for fn in filenames:
             filesSeen += 1
             if filesSeen > maxFiles:
@@ -369,515 +306,813 @@ def fuzzyFindInRoot(root, rawPath, maxHits=3, maxDepth=6, maxFiles=40000):
     targetName = p.name if p.name else raw
     targetStem = Path(targetName).stem
     targetExt = Path(targetName).suffix
-
     scored = []
     for d, fn in _walkLimited(root, maxDepth=maxDepth, maxFiles=maxFiles):
         cand = Path(fn)
-        candStem = cand.stem
-        candExt = cand.suffix
-
-        sStem = _sim(targetStem.lower(), candStem.lower())
+        sStem = _sim(targetStem.lower(), cand.stem.lower())
         sName = _sim(targetName.lower(), fn.lower())
-
-        extBonus = 0.0
-        if targetExt:
-            extBonus = 0.12 if candExt.lower() == targetExt.lower() else -0.08
-
-        try:
-            depthPenalty = (len(d.parts) - len(Path(root).parts)) * 0.01
-        except Exception:
-            depthPenalty = 0.0
-
-        score = (0.65 * sStem) + (0.35 * sName) + extBonus - depthPenalty
-
+        extBonus = 0.12 if targetExt and cand.suffix.lower() == targetExt.lower() else 0.0
+        score = (0.65 * sStem) + (0.35 * sName) + extBonus
         if score >= 0.62:
             scored.append((score, str((d / fn).resolve())))
-
     scored.sort(key=lambda x: x[0], reverse=True)
-
     out = []
     seen = set()
     for _, pathStr in scored:
-        if pathStr in seen:
-            continue
-        seen.add(pathStr)
-        out.append(pathStr)
+        if pathStr not in seen:
+            seen.add(pathStr)
+            out.append(pathStr)
         if len(out) >= maxHits:
             break
     return out
 
 def rankSuggestions(rawPath):
-    raw = normUserPath(rawPath)
-    p = Path(raw)
-
-    roots = []
-
-    try:
-        if p.parent and existingDir(p.parent):
-            roots.append(p.parent)
-    except Exception:
-        pass
-
-    roots.extend(bestEffortSearchRoots())
-
-    rSeen = set()
-    r2 = []
-    for r in roots:
-        try:
-            rr = Path(r).resolve()
-        except Exception:
-            rr = Path(r)
-        k = str(rr)
-        if k in rSeen:
-            continue
-        rSeen.add(k)
-        if rr.exists() and rr.is_dir():
-            r2.append(rr)
-
+    roots = bestEffortSearchRoots()
     hits = []
-    for i, r in enumerate(r2):
-        depth = 4 if i == 0 else 6 if i == 1 else 8
-        files = 20000 if i == 0 else 35000 if i == 1 else 60000
-        found = fuzzyFindInRoot(r, rawPath, maxHits=6, maxDepth=depth, maxFiles=files)
-        for f in found:
+    for i, r in enumerate(roots):
+        depth = 4 if i == 0 else 6
+        files = 20000 if i == 0 else 50000
+        for f in fuzzyFindInRoot(r, rawPath, maxHits=6, maxDepth=depth, maxFiles=files):
             if f not in hits:
                 hits.append(f)
             if len(hits) >= 3:
                 return hits[:3]
-
     return hits[:3]
-
-# =========================
-# Command handlers
-
-# NOTES: Top-level CLI actions for key generation, encryption, and decryption, including file/text/stdin routing and optional JSON responses.
-# =========================
-
-def cmdKey(args):
-    k = generatePKey(args.passphrase).lower() if args.passphrase else generatePKey().lower()
-    if args.save:
-        writeKeyFile(args.save, k)
-        if args.json:
-            emitJson({"ok": True, "mode": "key", "key": k, "saved_to": args.save})
-        else:
-            print(k)
-            print(args.save)
-        return 0
-    if args.json:
-        emitJson({"ok": True, "mode": "key", "key": k})
-    else:
-        print(k)
-    return 0
-
-def cmdEnc(args):
-    k = resolveKeyFromArgs(args, require=False)
-    keyArg = k if k else 0
-
-    if args.file:
-        fp = args.file
-        if not Path(fp).exists():
-            raise FileNotFoundError(fp)
-
-        validateFileCap(fp, args.no_limit)
-
-        data = readBinFile(fp)
-        payload = packFilePayload(fp, data)
-        c, used = encryptBytes(payload, keyArg)
-
-        outPath = chooseEncOutPath(fp, args.out)
-        writeTextFile(outPath, c)
-
-        if args.write_key:
-            writeKeyFile(args.write_key, used)
-
-        else:
-            print("")
-            print("Remember to save your key or else you cannot decrypt your file.")
-
-            choice = input(
-                "Would you like it displayed in terminal or saved as a key file? [d/s] (default: s): "
-            ).strip().lower()
-
-            if choice in {"", "s", "save"}:
-                outP = Path(outPath)
-                defaultKeyPath = str(outP.with_suffix(outP.suffix + ".pkey"))
-
-                nameOrPath = input(
-                    "Name/path for key file (blank = default next to encrypted file): "
-                ).strip()
-
-                if nameOrPath:
-                    kp = Path(normUserPath(nameOrPath))
-
-                    if isDirPath(kp):
-                        keyPath = str(Path(kp) / Path(defaultKeyPath).name)
-                    else:
-                        keyPath = str(kp)
-                        if not keyPath.lower().endswith(".pkey"):
-                            keyPath += ".pkey"
-                else:
-                    keyPath = defaultKeyPath
-
-                writeKeyFile(keyPath, used)
-                print(f"Wrote key file: {keyPath}", file=sys.stderr)
-
-            else:
-                if not args.quiet_key:
-                    print(used)
-
-        if args.json:
-            emitJson({
-                "ok": True,
-                "mode": "enc",
-                "input": "file",
-                "out": outPath,
-                "key": used,
-                "cipher_len": len(c)
-            })
-        else:
-            print(outPath)
-
-        return 0
-
-    if args.stdin:
-        pt = readStdinPayload(args.delim)
-    else:
-        pt = args.text
-
-    c, used = encryptData(pt, keyArg)
-
-    if args.write_key:
-        writeKeyFile(args.write_key, used)
-
-    if args.out:
-        writeTextFile(args.out, c)
-
-        if args.json:
-            emitJson({
-                "ok": True,
-                "mode": "enc",
-                "input": "text",
-                "out": args.out,
-                "key": used,
-                "cipher_len": len(c)
-            })
-        else:
-            print(args.out)
-            if not args.quiet_key:
-                print(used)
-
-        return 0
-
-    if args.json:
-        emitJson({
-            "ok": True,
-            "mode": "enc",
-            "input": "text",
-            "ciphertext": c,
-            "key": used
-        })
-    else:
-        print(c)
-        if not args.quiet_key:
-            print(used)
-
-    return 0
-
-def cmdDec(args):
-    k = resolveKeyFromArgs(args, require=True)
-
-    if args.file:
-        fp = args.file
-        if not Path(fp).exists():
-            raise FileNotFoundError(fp)
-        validateDecExtension(fp, args.force)
-
-        cipherStr = readTextFile(fp).strip()
-        payloadBytes = decryptBytes(cipherStr, k)
-        unpacked = unpackFilePayload(payloadBytes)
-
-        if unpacked:
-            restoredName, raw = unpacked
-            outPath = chooseDecOutPath(fp, restoredName, args.out)
-            writeBinFile(outPath, raw)
-            if args.json:
-                emitJson({"ok": True, "mode": "dec", "input": "file", "out": outPath, "restored_name": restoredName})
-            else:
-                print(outPath)
-            return 0
-
-        if args.as_text:
-            try:
-                s = payloadBytes.decode("utf-16-le", errors="surrogatepass")
-                if args.json:
-                    emitJson({"ok": True, "mode": "dec", "input": "file", "as_text": True, "plaintext_len": len(s)})
-                else:
-                    print(s)
-                return 0
-            except Exception:
-                try:
-                    s = payloadBytes.decode("utf-8")
-                except Exception:
-                    s = payloadBytes.decode("latin-1")
-                if args.json:
-                    emitJson({"ok": True, "mode": "dec", "input": "file", "as_text": True, "plaintext_len": len(s)})
-                else:
-                    print(s)
-                return 0
-
-        outPath = args.out or str(Path(fp).with_name("restored.bin"))
-        writeBinFile(outPath, payloadBytes)
-        if args.json:
-            emitJson({"ok": True, "mode": "dec", "input": "file", "out": outPath})
-        else:
-            print(outPath)
-        return 0
-
-    if args.stdin:
-        ct = readStdinPayload(args.delim).strip()
-    else:
-        ct = args.text.strip()
-
-    payloadBytes = decryptBytes(ct, k)
-    unpacked = unpackFilePayload(payloadBytes)
-
-    if unpacked and not args.as_text:
-        restoredName, raw = unpacked
-        outPath = args.out or restoredName
-        writeBinFile(outPath, raw)
-        if args.json:
-            emitJson({"ok": True, "mode": "dec", "input": "text", "out": outPath, "restored_name": restoredName})
-        else:
-            print(outPath)
-        return 0
-
-    pt = payloadBytes.decode("utf-16-le", errors="surrogatepass")
-
-    if args.out:
-        writeTextFile(args.out, pt)
-        if args.json:
-            emitJson({"ok": True, "mode": "dec", "input": "text", "out": args.out, "plaintext_len": len(pt)})
-        else:
-            print(args.out)
-        return 0
-
-    if args.json:
-        emitJson({"ok": True, "mode": "dec", "input": "text", "as_text": True, "plaintext_len": len(pt)})
-    else:
-        print(pt)
-    return 0
-
-# =========================
-# Interactive wizard and recovery flow
-
-# NOTES: Guided terminal workflow for encrypt/decrypt/key tasks and path-recovery assistance when a requested file cannot be found.
-# =========================
-
-def interactiveWizard():
-    print("SHEP32 Interactive Wizard")
-    print("1) Encrypt  2) Decrypt  3) Generate Key  4) Exit")
-    choice = input("> ").strip()
-    if choice in {"4", "q", "quit", "exit"}:
-        return 0
-
-    if choice == "3":
-        try:
-            phrase = input("Passphrase (blank = random): ").strip()
-            k = generatePKey(phrase).lower() if phrase else generatePKey().lower()
-            print(k)
-            save = input("Save to .pkey file? (path/blank to skip): ").strip()
-            if save:
-                writeKeyFile(save, k)
-                print(f"Wrote {save}", file=sys.stderr)
-            return 0
-        except Exception as e:
-            printErr(str(e))
-            return 2
-
-    isEnc = (choice == "1")
-    kind = input("Input type:    1) File  2) Text : ").strip()
-
-    if kind == "1":
-        fpRaw = input("File path: ").strip()
-        fp = wizardPickExistingPath(fpRaw, label="File")
-        if not fp:
-            return 0
-
-        if isEnc:
-            class A: pass
-            a = A()
-            a.file = fp; a.text = None; a.stdin = False; a.delim = None
-            a.key = None; a.passphrase = None; a.keyfile = None
-            a.out = None; a.no_limit = False; a.quiet_key = False; a.write_key = None; a.json = False
-            try:
-                return cmdEnc(a)
-            except Exception as e:
-                printErr(str(e))
-                return 2
-
-        class B: pass
-        b = B()
-        b.file = fp; b.text = None; b.stdin = False; b.delim = None
-        b.key = input("Key (64-hex) or blank to use keyfile/passphrase: ").strip() or None
-        b.passphrase = None; b.keyfile = None
-        b.out = None; b.as_text = False; b.force = False; b.json = False
-
-        if not b.key:
-            b.keyfile = input("Keyfile (.pkey) path or blank: ").strip() or None
-            if not b.keyfile:
-                b.passphrase = input("Passphrase or blank: ").strip() or None
-
-        try:
-            return cmdDec(b)
-        except Exception as e:
-            printErr(str(e))
-            return 2
-
-    if kind == "2":
-        if isEnc:
-            pt = input("Plaintext: ")
-            class A: pass
-            a = A()
-            a.file = None; a.text = pt; a.stdin = False; a.delim = None
-            a.key = None; a.passphrase = None; a.keyfile = None
-            a.out = None; a.no_limit = False; a.quiet_key = False; a.write_key = None; a.json = False
-            try:
-                return cmdEnc(a)
-            except Exception as e:
-                printErr(str(e))
-                return 2
-
-        ct = input("Ciphertext (base62): ").strip()
-        class B: pass
-        b = B()
-        b.file = None; b.text = ct; b.stdin = False; b.delim = None
-        b.key = input("Key (64-hex): ").strip()
-        b.passphrase = None; b.keyfile = None
-        b.out = None; b.as_text = True; b.force = False; b.json = False
-        try:
-            return cmdDec(b)
-        except Exception as e:
-            printErr(str(e))
-            return 2
-
-    printErr("Unknown selection.")
-    return 2
-    printErr("Unknown selection.")
-    return 2
 
 def wizardPickExistingPath(rawPath, label="File"):
     rawPath = str(rawPath).strip()
     resolved = firstExistingFile(rawPath)
     if resolved:
         return resolved
-
     tried = [str(v) for v in tryPathVariants(rawPath)]
     print(f"Could not find {label}: {rawPath}")
-    print("Tried:")
-    for t in tried:
-        print(f" - {t}")
-
+    if tried:
+        print("Tried:")
+        for t in tried:
+            print(f" - {t}")
     sug = rankSuggestions(rawPath)
     if not sug:
         print("No suggestions found.")
         return None
-
     print("\nSuggestions:")
     for i, s in enumerate(sug, 1):
         print(f"{i}) {s}")
-    print("4) Quit")
-
+    print(f"{len(sug)+1}) Quit")
     while True:
         pick = input("> ").strip()
-        if pick == "4":
+        if pick == str(len(sug)+1):
             return None
-        if pick in {"1", "2", "3"}:
+        if pick.isdigit():
             idx = int(pick) - 1
-            if idx < len(sug) and existingFile(sug[idx]):
+            if 0 <= idx < len(sug) and existingFile(sug[idx]):
                 return str(Path(sug[idx]).resolve())
-            print("That selection is no longer available.")
-            return None
-        print("Choose 1, 2, 3, or 4.")
+        print("Choose one of the listed options.")
 
-# =========================
-# Argument parser definition
+def parseMaybeInt(s):
+    return int(str(s).strip())
 
-# NOTES: argparse command tree for start, key, encrypt, and decrypt modes with shared compatibility aliases and output controls.
-# =========================
+def printProgBar(label, done, total, started):
+    if total <= 0:
+        return
+    frac = max(0.0, min(1.0, float(done) / float(total)))
+    barW = 30
+    fill = int(frac * barW)
+    elapsed = int(time.perf_counter() - started)
+    bar = "#" * fill + "." * (barW - fill)
+    sys.stderr.write(f"\r{label} [{bar}] {int(frac*100):3d}% {done}/{total} elapsed {elapsed}s")
+    sys.stderr.flush()
+    if done >= total:
+        sys.stderr.write("\n")
+        sys.stderr.flush()
+
+def generateHashRange(start, hashes, mode=0, count=8, directBits=256, laneBits=336, blockBytes=4096, bare=False, showProgress=False, label="HASH"):
+    out = []
+    cur = int(start)
+    started = time.perf_counter()
+    for i in range(int(hashes)):
+        h = generateKey(cur, mode, count, directBits, laneBits, blockBytes)
+        out.append(h if bare else f"{cur} = {h}")
+        cur += 1
+        if showProgress:
+            printProgBar(label, i + 1, int(hashes), started)
+    return out
+
+def writeHashRange(path, start, hashes, mode=0, count=8, directBits=256, laneBits=336, blockBytes=4096, bare=False, showProgress=True, label="HASH"):
+    with open(path, "w", encoding="utf-8", newline="\n") as fp:
+        cur = int(start)
+        started = time.perf_counter()
+        for i in range(int(hashes)):
+            h = generateKey(cur, mode, count, directBits, laneBits, blockBytes)
+            fp.write((h if bare else f"{cur} = {h}") + "\n")
+            cur += 1
+            if showProgress:
+                printProgBar(label, i + 1, int(hashes), started)
+
+def randBits(nBits):
+    nBits = max(1, int(nBits))
+    raw = int.from_bytes(os.urandom((nBits + 7) // 8), "big")
+    return raw & ((1 << nBits) - 1)
+
+def makeBenchInputs(hashes, start=None, inputBits=256, randomInputs=True):
+    hashes = int(hashes)
+    if hashes < 1:
+        raise ValueError("hashes must be >= 1")
+    if randomInputs:
+        return [randBits(inputBits) for _ in range(hashes)]
+    base = 0 if start is None else int(start)
+    return [base + i for i in range(hashes)]
+
+def sha256NumHex(x):
+    return hashlib.sha256(str(int(x)).encode("ascii")).hexdigest()
+
+def meanFlipRate(hexA, hexB):
+    a = int(hexA, 16)
+    b = int(hexB, 16)
+    return ((a ^ b).bit_count()) / 256.0
+
+def benchSpeed(inputs, mode=0, count=8, directBits=256, laneBits=336, blockBytes=4096, showProgress=True, label="Benchmarking"):
+    started = time.perf_counter()
+    last = ""
+    total = len(inputs)
+    for i, x in enumerate(inputs, 1):
+        last = generateKey(x, mode, count, directBits, laneBits, blockBytes)
+        if showProgress:
+            _printProg(label, i, total)
+    elapsed = time.perf_counter() - started
+    rate = (float(total) / elapsed) if elapsed > 0 else 0.0
+    return {"hashes": total, "elapsed": elapsed, "hashesPerSec": rate, "last": last}
+
+def benchCompare(inputs, mode=0, count=8, directBits=256, laneBits=336, blockBytes=4096, inputBits=256, showProgress=True, label="Diffusion report"):
+    total = len(inputs) * (int(inputBits) + 1) * 2
+    done = 0
+    shepBase = []
+    shaBase = []
+    for x in inputs:
+        shepBase.append(generateKey(x, mode, count, directBits, laneBits, blockBytes))
+        done += 1
+        if showProgress: _printProg(label, done, total)
+    for x in inputs:
+        shaBase.append(sha256NumHex(x))
+        done += 1
+        if showProgress: _printProg(label, done, total)
+    shepFlip = 0.0
+    shaFlip = 0.0
+    cells = len(inputs) * int(inputBits)
+    for bit in range(int(inputBits)):
+        mask = 1 << bit
+        for i, x in enumerate(inputs):
+            shepFlip += meanFlipRate(shepBase[i], generateKey(x ^ mask, mode, count, directBits, laneBits, blockBytes))
+            done += 1
+            if showProgress: _printProg(label, done, total)
+        for i, x in enumerate(inputs):
+            shaFlip += meanFlipRate(shaBase[i], sha256NumHex(x ^ mask))
+            done += 1
+            if showProgress: _printProg(label, done, total)
+    return {
+        "samples": len(inputs),
+        "inputBits": int(inputBits),
+        "shepMeanFlipRate": (shepFlip / cells) if cells else 0.0,
+        "sha256MeanFlipRate": (shaFlip / cells) if cells else 0.0,
+    }
+
+def saveBenchReport(path, rows):
+    with open(path, "w", encoding="utf-8", newline="\n") as fp:
+        for k, v in rows:
+            fp.write(f"{k}\t{v}\n")
+
+
+def benchRange(start=None, hashes=0, mode=0, count=8, directBits=256, laneBits=336, blockBytes=4096, randomInputs=True, inputBits=256, compare=False, out=None, showProgress=True):
+    inputs = makeBenchInputs(hashes, start=start, inputBits=inputBits, randomInputs=randomInputs)
+    speed = benchSpeed(inputs, mode, count, directBits, laneBits, blockBytes, showProgress, "Benchmarking")
+    rows = [("hashes", speed["hashes"]), ("elapsed", f"{speed['elapsed']:.6f}"), ("hashesPerSec", f"{speed['hashesPerSec']:.6f}"), ("last", speed["last"]), ("randomInputs", str(bool(randomInputs)).lower()), ("inputBits", int(inputBits))]
+    if compare:
+        comp = benchCompare(inputs, mode, count, directBits, laneBits, blockBytes, inputBits, showProgress, "Diffusion report")
+        rows.extend([("shepMeanFlipRate", f"{comp['shepMeanFlipRate']:.10f}"), ("sha256MeanFlipRate", f"{comp['sha256MeanFlipRate']:.10f}")])
+    if out:
+        saveBenchReport(out, rows)
+        print(out)
+    else:
+        for k, v in rows:
+            print(f"{k}={v}")
+
+def _fileHash(path, mode=0, count=8, directBits=256, laneBits=336, blockBytes=65536):
+    return generateKeyFile(path, mode, count, directBits, laneBits, blockBytes)
+
+def cmdKey(args):
+    mode = 0 if int(args.mode) == 0 else 1
+    if args.file:
+        k = _fileHash(args.file, mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
+    elif args.value is not None:
+        k = generateKey(int(args.value), mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
+    elif args.text is not None:
+        k = generateKey(args.text, mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
+    elif args.passphrase is not None:
+        k = generateKey(args.passphrase, mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
+    else:
+        k = generateKey(None, mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
+    if args.save:
+        writeKeyFile(args.save, k)
+    if args.json:
+        emitJson({"ok": True, "mode": "key", "key": k, "saved_to": args.save})
+    else:
+        print(k)
+        if args.save:
+            print(args.save)
+    return 0
+
+def cmdHash(args):
+    mode = 0 if int(args.mode) == 0 else 1
+    if args.file:
+        out = _fileHash(args.file, mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
+    elif args.value is not None:
+        out = generateKey(int(args.value), mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
+    else:
+        out = generateKey(args.text, mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
+    if args.json:
+        emitJson({"ok": True, "mode": "hash", "value": out})
+    else:
+        print(out)
+    return 0
+
+def cmdRange(args):
+    lines = generateHashRange(args.start, args.hashes, args.mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes, args.bare, args.progress)
+    if args.out:
+        writeTextFile(args.out, "\n".join(lines) + ("\n" if lines else ""))
+        print(args.out)
+    else:
+        for line in lines:
+            print(line)
+    return 0
+
+def cmdBench(args):
+    randomInputs = True if args.random_inputs is None and args.start is None else bool(args.random_inputs)
+    benchRange(args.start, args.hashes, args.mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes, randomInputs, args.input_bits, args.compare, args.out, not args.no_progress)
+    return 0
+
+def cmdPair(args):
+    keyMode = 0 if int(args.mode) == 0 else 333
+    if args.file:
+        master = _fileHash(args.file, 0 if keyMode == 0 else 1, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
+    elif args.value is not None:
+        master = generateKey(int(args.value), 0 if keyMode == 0 else 1, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
+    else:
+        master = generateKey(args.text, 0 if keyMode == 0 else 1, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
+    pair = computeKeyPair(master, keyMode, FIXED_COUNT)
+    if args.json:
+        emitJson({"ok": True, "mode": "pair", **pair})
+    else:
+        for k, v in pair.items():
+            print(f"{k}={v}")
+    return 0
+
+def cmdPubKey(args):
+    keyMode = 0 if int(args.mode) == 0 else 333
+    k = resolveKeyFromArgs(args, require=True)
+    pub = generatePublicKey(k, keyMode, FIXED_COUNT)
+    if args.json:
+        emitJson({"ok": True, "mode": "pubkey", "publicKey": pub})
+    else:
+        print(pub)
+    return 0
+
+def cmdSign(args):
+    keyMode = 0 if int(args.mode) == 0 else 333
+    k = resolveKeyFromArgs(args, require=True)
+    payload = readTextFile(args.file) if args.file else (readStdinPayload(args.delim) if args.stdin else args.text)
+    sig = signData(payload, k, keyMode, FIXED_COUNT)
+    if args.json:
+        emitJson({"ok": True, "mode": "sign", **sig})
+    else:
+        print(f"signature={sig['signature']}")
+        print(f"publicKey={sig['publicKey']}")
+    return 0
+
+def cmdVerify(args):
+    payload = readTextFile(args.file) if args.file else (readStdinPayload(args.delim) if args.stdin else args.text)
+    signature = maybeLoadToken(args.signature)
+    publicKey = maybeLoadToken(args.public_key)
+    ok = verifySignature(payload, signature, publicKey)
+    if args.json:
+        emitJson({"ok": True, "mode": "verify", "valid": bool(ok)})
+    else:
+        print("true" if ok else "false")
+    return 0
+
+def cmdEnc(args):
+    keyMode = 0 if int(args.mode) == 0 else 333
+    k = resolveKeyFromArgs(args, require=False)
+    chunkBytes = resolveChunkBytes(args.chunk_size, getattr(args, "chunk_bytes", None))
+    progress = None if args.json or getattr(args, "no_progress", False) else makeProgress("Encrypting")
+
+    if args.file:
+        fp = args.file
+        if not Path(fp).exists():
+            raise FileNotFoundError(fp)
+        validateFileCap(fp, args.no_limit)
+        payload = packFilePayload(fp, readBinFile(fp))
+        encObj, used = encryptData(payload, k, keyMode=0 if keyMode == 0 else 1, count=FIXED_COUNT, detached=args.detached, compress=not args.no_compress, chunkSize=chunkBytes, powBits=args.pow_bits, powStart=args.pow_start, progress=progress)
+        srcLabel = fp
+    else:
+        pt = readStdinPayload(args.delim) if args.stdin else args.text
+        encObj, used = encryptData(pt, k, keyMode=0 if keyMode == 0 else 1, count=FIXED_COUNT, detached=args.detached, compress=not args.no_compress, chunkSize=chunkBytes, powBits=args.pow_bits, powStart=args.pow_start, progress=progress)
+        srcLabel = "cipher"
+
+    autoKeyOut = None
+    if args.write_key:
+        writeKeyFile(args.write_key, used)
+        autoKeyOut = args.write_key
+
+    if args.detached:
+        body = encObj["body"]
+        meta = encObj["meta"]
+        if args.out:
+            bodyPath, metaPath = chooseDetachedOutPaths(srcLabel, args.out)
+            writeTextFile(bodyPath, body)
+            writeTextFile(metaPath, meta)
+            if autoKeyOut is None:
+                autoKeyOut = defaultKeyOutPath(bodyPath)
+                writeKeyFile(autoKeyOut, used)
+            if args.json:
+                emitJson({"ok": True, "mode": "enc", "detached": True, "body_out": bodyPath, "meta_out": metaPath, "key": used, "key_out": autoKeyOut, "chunk_bytes": chunkBytes})
+            else:
+                print(bodyPath)
+                print(metaPath)
+                print(autoKeyOut)
+                if not args.quiet_key:
+                    print(used)
+            return 0
+        if args.json:
+            emitJson({"ok": True, "mode": "enc", "detached": True, "body": body, "meta": meta, "key": used, "chunk_bytes": chunkBytes})
+        else:
+            print(f"meta={meta}")
+            print(f"body={body}")
+            if not args.quiet_key:
+                print(used)
+        return 0
+
+    cipher = encObj
+    if args.out or args.file:
+        outPath = chooseTextOutPath(args.out, defaultName="cipher.sh32") if args.out else defaultEncOutPath(srcLabel)
+        writeTextFile(outPath, cipher)
+        if autoKeyOut is None:
+            autoKeyOut = defaultKeyOutPath(outPath)
+            writeKeyFile(autoKeyOut, used)
+        if args.json:
+            emitJson({"ok": True, "mode": "enc", "detached": False, "out": outPath, "key": used, "key_out": autoKeyOut, "chunk_bytes": chunkBytes})
+        else:
+            print(outPath)
+            print(autoKeyOut)
+            if not args.quiet_key:
+                print(used)
+        return 0
+
+    if args.json:
+        emitJson({"ok": True, "mode": "enc", "detached": False, "cipher": cipher, "key": used, "chunk_bytes": chunkBytes})
+    else:
+        print(cipher)
+        if not args.quiet_key:
+            print(used)
+    return 0
+
+def cmdDec(args):
+    keyMode = None if args.mode is None else (0 if int(args.mode) == 0 else 1)
+    k = resolveKeyFromArgs(args, require=True)
+    progress = None if args.json or getattr(args, "no_progress", False) else makeProgress("Decrypting")
+
+    if args.body is not None or args.meta is not None:
+        if args.body is None or args.meta is None:
+            raise ValueError("Provide both --body and --meta for detached decryption.")
+        body = maybeLoadToken(args.body)
+        meta = maybeLoadToken(args.meta)
+        pt = decryptData(body, k, keyMode=keyMode, count=FIXED_COUNT, meta=meta, progress=progress)
+        srcPath = "detached"
+    elif args.file:
+        fp = args.file
+        if not Path(fp).exists():
+            raise FileNotFoundError(fp)
+        token = readTextFile(fp).strip()
+        pt = decryptData(token, k, keyMode=keyMode, count=FIXED_COUNT, progress=progress)
+        srcPath = fp
+    else:
+        token = readStdinPayload(args.delim).strip() if args.stdin else args.text.strip()
+        pt = decryptData(token, k, keyMode=keyMode, count=FIXED_COUNT, progress=progress)
+        srcPath = "token"
+
+    unpacked = None if args.as_text else unpackFilePayload(pt)
+    if unpacked and not args.as_text:
+        restoredName, raw = unpacked
+        outPath = chooseDecOutPath(srcPath, restoredName, args.out)
+        writeBinFile(outPath, raw)
+        if args.json:
+            emitJson({"ok": True, "mode": "dec", "out": outPath, "restored_name": restoredName})
+        else:
+            print(outPath)
+        return 0
+
+    if args.out:
+        writeTextFile(args.out, pt)
+        if args.json:
+            emitJson({"ok": True, "mode": "dec", "out": args.out})
+        else:
+            print(args.out)
+        return 0
+
+    if args.json:
+        emitJson({"ok": True, "mode": "dec", "text": pt})
+    else:
+        print(pt)
+    return 0
+
+def promptMode(default=0):
+    s = input(f"Mode 0=primary, 1=extended [default {default}]: ").strip()
+    return default if s == "" else (0 if int(s) == 0 else 1)
+
+def promptCount(default=8):
+    return FIXED_COUNT
+
+def promptChunkUnits(default=1):
+    s = input(f"Chunk size units x{CHUNK_UNIT} [default {default}]: ").strip()
+    units = default if s == "" else int(s)
+    return resolveChunkBytes(units)
+
+def promptKeySource(require=False):
+    print("Key source: 1) direct key  2) passphrase  3) key file  4) auto")
+    choice = input("> ").strip()
+    if choice == "1":
+        return sanitizeKeyToken(input("Key: "))
+    if choice == "2":
+        return input("Passphrase: ")
+    if choice == "3":
+        kp = wizardPickExistingPath(input("Key file path: "), label="Key file")
+        return loadKeyFromFile(kp) if kp else None
+    if require:
+        print("A key source is required.")
+        return promptKeySource(require=True)
+    return None
+
+def interactiveWizard():
+    while True:
+        print("SHEP Interactive Menu")
+        print("1) Hash")
+        print("2) Encrypt")
+        print("3) Decrypt")
+        print("4) Generate Key")
+        print("5) Public Key")
+        print("6) Sign")
+        print("7) Verify")
+        print("8) Range")
+        print("9) Benchmark")
+        print("10) Exit")
+        choice = input("> ").strip()
+        try:
+            if choice in {"10", "q", "quit", "exit"}:
+                return 0
+            if choice == "4":
+                mode = promptMode(0)
+                count = FIXED_COUNT
+                kind = input("Source: 1) random  2) text  3) integer  4) file : ").strip()
+                if kind == "2": k = generateKey(input("Text: "), mode, count)
+                elif kind == "3": k = generateKey(int(input("Integer value: ").strip()), mode, count)
+                elif kind == "4":
+                    fp = wizardPickExistingPath(input("File path: "), label="File")
+                    if not fp: continue
+                    k = generateKeyFile(fp, mode, count)
+                else: k = generateKey(None, mode, count)
+                print(k)
+                save = input("Save to key file? (path/blank to skip): ").strip()
+                if save:
+                    writeKeyFile(save, k)
+                    print(f"Wrote {save}", file=sys.stderr)
+                continue
+            if choice == "1":
+                mode = promptMode(0)
+                count = FIXED_COUNT
+                kind = input("Source: 1) text  2) file : ").strip()
+                if kind == "2":
+                    fp = wizardPickExistingPath(input("File path: "), label="File")
+                    if fp: print(generateKeyFile(fp, mode, count))
+                else: print(generateKey(input("Text: "), mode, count))
+                continue
+            if choice == "2":
+                mode = promptMode(0)
+                count = FIXED_COUNT
+                advanced = input("Advanced options? [y/N]: ").strip().lower() in {"y", "yes"}
+                detached = False
+                noCompress = False
+                chunkBytes = CHUNK_UNIT
+                powBits = 0
+                powStart = 0
+                if advanced:
+                    detached = input("Detached output? [y/N]: ").strip().lower() in {"y", "yes"}
+                    noCompress = input("Disable compression? [y/N]: ").strip().lower() in {"y", "yes"}
+                    chunkBytes = promptChunkUnits(1)
+                    x = input("Proof-of-work bits [default 0]: ").strip()
+                    powBits = 0 if x == "" else int(x)
+                    x = input("Proof-of-work start nonce [default 0]: ").strip()
+                    powStart = 0 if x == "" else int(x)
+                kind = input("Input type: 1) text  2) file : ").strip()
+                k = promptKeySource(require=False)
+                progress = makeProgress("Encrypting")
+                if kind == "2":
+                    fp = wizardPickExistingPath(input("File path: "), label="File")
+                    if not fp: continue
+                    size = Path(fp).stat().st_size
+                    noLimit = False
+                    if size > DEFAULT_MAX_BYTES:
+                        noLimit = input(f"File is {size} bytes and exceeds the default limit of {DEFAULT_MAX_BYTES}. Override limit? [y/N]: ").strip().lower() in {"y", "yes"}
+                    validateFileCap(fp, noLimit)
+                    payload = packFilePayload(fp, readBinFile(fp))
+                    out, used = encryptData(payload, k, keyMode=mode, count=count, detached=detached, compress=not noCompress, chunkSize=chunkBytes, powBits=powBits, powStart=powStart, progress=progress)
+                    if detached:
+                        base = input(f"Base output path [default {Path(fp).with_suffix('')}]: ").strip() or str(Path(fp).with_suffix(''))
+                        bodyPath = base + ".sh32.body"
+                        metaPath = base + ".sh32.meta"
+                        writeTextFile(bodyPath, out["body"])
+                        writeTextFile(metaPath, out["meta"])
+                        keyPath = input(f"Key file path [default {Path(bodyPath).with_suffix('.pkey')}]: ").strip() or str(Path(bodyPath).with_suffix('.pkey'))
+                        writeKeyFile(keyPath, used)
+                        print(bodyPath)
+                        print(metaPath)
+                        print(keyPath)
+                    else:
+                        outPath = input(f"Output path [default {Path(fp).with_suffix('.sh32')}]: ").strip() or str(Path(fp).with_suffix('.sh32'))
+                        outPath = chooseTextOutPath(outPath, defaultName=Path(outPath).name)
+                        writeTextFile(outPath, out)
+                        keyPath = input(f"Key file path [default {Path(outPath).with_suffix('.pkey')}]: ").strip() or str(Path(outPath).with_suffix('.pkey'))
+                        writeKeyFile(keyPath, used)
+                        print(outPath)
+                        print(keyPath)
+                else:
+                    textIn = input("Plaintext: ")
+                    out, used = encryptData(textIn, k, keyMode=mode, count=count, detached=detached, compress=not noCompress, chunkSize=chunkBytes, powBits=powBits, powStart=powStart, progress=progress)
+                    save = input("Save ciphertext to .sh32 file? [y/N]: ").strip().lower() in {"y", "yes"}
+                    if detached:
+                        if save:
+                            base = input("Base output path [default cipher]: ").strip() or "cipher"
+                            bodyPath = base + ".sh32.body"
+                            metaPath = base + ".sh32.meta"
+                            writeTextFile(bodyPath, out["body"])
+                            writeTextFile(metaPath, out["meta"])
+                            keyPath = input(f"Key file path [default {Path(bodyPath).with_suffix('.pkey')}]: ").strip() or str(Path(bodyPath).with_suffix('.pkey'))
+                            writeKeyFile(keyPath, used)
+                            print(bodyPath)
+                            print(metaPath)
+                            print(keyPath)
+                        else:
+                            print(f"meta={out['meta']}")
+                            print(f"body={out['body']}")
+                            print(used)
+                    else:
+                        if save:
+                            outPath = input("Output path [default cipher.sh32]: ").strip() or "cipher.sh32"
+                            outPath = chooseTextOutPath(outPath, defaultName="cipher.sh32")
+                            writeTextFile(outPath, out)
+                            keyPath = input(f"Key file path [default {Path(outPath).with_suffix('.pkey')}]: ").strip() or str(Path(outPath).with_suffix('.pkey'))
+                            writeKeyFile(keyPath, used)
+                            print(outPath)
+                            print(keyPath)
+                        else:
+                            print(out)
+                            print(used)
+                continue
+            if choice == "3":
+                modeText = input("Mode 0=SHEP64, 1=SHEP72, blank=auto: ").strip()
+                mode = None if modeText == "" else (0 if int(modeText) == 0 else 1)
+                count = FIXED_COUNT
+                advanced = input("Advanced options? [y/N]: ").strip().lower() in {"y", "yes"}
+                asText = False
+                detachedIn = False
+                if advanced:
+                    asText = input("Treat output as text only? [y/N]: ").strip().lower() in {"y", "yes"}
+                    detachedIn = input("Detached input? [y/N]: ").strip().lower() in {"y", "yes"}
+                kind = input("Input type: 1) text  2) file : ").strip()
+                k = promptKeySource(require=True)
+                progress = makeProgress("Decrypting")
+                if detachedIn:
+                    if kind == "2":
+                        bodyPath = wizardPickExistingPath(input("Body file path: "), label="Body file")
+                        metaPath = wizardPickExistingPath(input("Meta file path: "), label="Meta file")
+                        if not bodyPath or not metaPath: continue
+                        body = readTextFile(bodyPath).strip()
+                        meta = readTextFile(metaPath).strip()
+                    else:
+                        body = maybeLoadToken(input("Body token: ").strip())
+                        meta = maybeLoadToken(input("Meta token: ").strip())
+                    pt = decryptData(body, k, keyMode=mode, count=count, meta=meta, progress=progress)
+                else:
+                    if kind == "2":
+                        fp = wizardPickExistingPath(input("Token file path: "), label="Cipher file")
+                        if not fp: continue
+                        token = readTextFile(fp).strip()
+                    else:
+                        token = input("Ciphertext token: ").strip()
+                    pt = decryptData(token, k, keyMode=mode, count=count, progress=progress)
+                unpacked = None if asText else unpackFilePayload(pt)
+                if unpacked and not asText:
+                    restoredName, raw = unpacked
+                    outPath = input(f"Restore output path [default {restoredName}]: ").strip() or restoredName
+                    writeBinFile(outPath, raw)
+                    print(outPath)
+                else:
+                    saveText = input("Save plaintext to file? [y/N]: ").strip().lower() in {"y", "yes"}
+                    if saveText:
+                        outPath = input("Output path [default plain.txt]: ").strip() or "plain.txt"
+                        writeTextFile(outPath, pt)
+                        print(outPath)
+                    else:
+                        print(pt)
+                continue
+            if choice == "5":
+                mode = promptMode(0)
+                count = FIXED_COUNT
+                k = promptKeySource(require=True)
+                print(generatePublicKey(k, 0 if mode == 0 else 333, count))
+                continue
+            if choice == "6":
+                mode = promptMode(0)
+                count = FIXED_COUNT
+                k = promptKeySource(require=True)
+                text = input("Text to sign: ")
+                sig = signData(text, k, 0 if mode == 0 else 333, count)
+                print(f"signature={sig['signature']}")
+                print(f"publicKey={sig['publicKey']}")
+                continue
+            if choice == "7":
+                text = input("Text to verify: ")
+                sig = input("Signature token: ").strip()
+                pub = input("Public key token: ").strip()
+                print("true" if verifySignature(text, maybeLoadToken(sig), maybeLoadToken(pub)) else "false")
+                continue
+            if choice == "8":
+                mode = promptMode(0)
+                count = FIXED_COUNT
+                start = int(input("Start integer: ").strip())
+                hashes = int(input("How many hashes: ").strip())
+                bare = input("Bare hashes only? [y/N]: ").strip().lower() in {"y", "yes"}
+                for line in generateHashRange(start, hashes, mode, count, bare=bare):
+                    print(line)
+                continue
+            if choice == "9":
+                mode = promptMode(0)
+                count = FIXED_COUNT
+                benchType = input("Benchmark type: 1) speed  2) speed + diffusion report [default 1]: ").strip() or "1"
+                randomInputs = input("Use random inputs? [Y/n]: ").strip().lower() not in {"n", "no"}
+                hashes = int((input("How many inputs / hashes [default 1000]: ").strip() or "1000"))
+                inputBits = int((input("Input bits [default 256]: ").strip() or "256"))
+                start = None
+                if not randomInputs:
+                    start = int((input("Start integer [default 0]: ").strip() or "0"))
+                save = input("Save benchmark report to file? [y/N]: ").strip().lower() in {"y", "yes"}
+                out = None
+                if save:
+                    out = input("Output path [default bench.tsv]: ").strip() or "bench.tsv"
+                showProgress = input("Show progress? [Y/n]: ").strip().lower() not in {"n", "no"}
+                benchRange(start, hashes, mode, count, randomInputs=randomInputs, inputBits=inputBits, compare=(benchType == "2"), out=out, showProgress=showProgress)
+                continue
+            printErr("Unknown selection.")
+        except Exception as e:
+            printErr(str(e))
+    return 0
 
 def buildParser():
-    parser = argparse.ArgumentParser(
-        prog="shep32",
-        description="SHEP32 CLI (enc/dec/key/start)",
-        formatter_class=argparse.RawTextHelpFormatter
-    )
-    parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
-
+    parser = argparse.ArgumentParser(prog="shep", description="SHEP CLI — SHEP64 primary keys and SHEP72 extended keys", formatter_class=argparse.RawTextHelpFormatter)
+    parser.add_argument("--version", action="version", version=f"%(prog)s {CLI_VERSION}")
     sub = parser.add_subparsers(dest="cmd")
+    sub.add_parser("start", help="Open the interactive menu")
 
-    sub.add_parser("start", help="Interactive guided workflow")
+    def addModeArgs(p):
+        p.add_argument("--mode", type=int, default=0, help="0 = SHEP64 primary, 1 = SHEP72 extended")
+        p.add_argument("--direct-bits", dest="direct_bits", type=int, default=256)
+        p.add_argument("--lane-bits", dest="lane_bits", type=int, default=336)
+        p.add_argument("--block-bytes", dest="block_bytes", type=int, default=4096)
 
-    pk = sub.add_parser("key", help="Generate / derive a 64-hex key")
-    pk.add_argument("-p", "--passphrase", default=None, help="Derive from passphrase (deterministic)")
-    pk.add_argument("--save", default=None, help="Save key as .pkey file")
-    pk.add_argument("--json", action="store_true", help="Output JSON")
+    def addChunkArgs(p):
+        p.add_argument("--chunk-size", dest="chunk_size", type=int, default=1, help=f"Chunk units of {CHUNK_UNIT} bytes (default 1)")
+        p.add_argument("--chunk-bytes", dest="chunk_bytes", type=int, default=None, help="Exact chunk size in bytes")
 
-    pe = sub.add_parser("enc", help="Encrypt file or plaintext")
-    srcE = pe.add_mutually_exclusive_group(required=True)
-    srcE.add_argument("-f", "--file", dest="file", default=None, help="File path to encrypt")
-    srcE.add_argument("--text", dest="text", default=None, help="Plaintext to encrypt")
-    srcE.add_argument("-e", dest="text", default=None, help="Alias for --text (compat)")
-    srcE.add_argument("--stdin", action="store_true", help="Read plaintext from stdin")
+    pk = sub.add_parser("key", help="Generate a fresh random key or derive one from text, integer, file, or passphrase input")
+    g = pk.add_mutually_exclusive_group(required=False)
+    g.add_argument("--text", default=None)
+    g.add_argument("--value", default=None)
+    g.add_argument("--file", default=None)
+    g.add_argument("-p", "--passphrase", default=None)
+    addModeArgs(pk)
+    pk.add_argument("--save", default=None)
+    pk.add_argument("--json", action="store_true")
 
-    pe.add_argument("--delim", default=None, help="Optional delimiter markers for stdin: DELIM:BEGIN ... DELIM:END")
+    ph = sub.add_parser("hash", help="Deterministically derive a SHEP64 or SHEP72 key from text, integer, or file input")
+    g = ph.add_mutually_exclusive_group(required=True)
+    g.add_argument("--text", default=None)
+    g.add_argument("--value", default=None)
+    g.add_argument("--file", default=None)
+    addModeArgs(ph)
+    ph.add_argument("--json", action="store_true")
 
-    keyE = pe.add_mutually_exclusive_group(required=False)
-    keyE.add_argument("--key", default=None, help="64-hex key")
-    keyE.add_argument("-p", "--passphrase", default=None, help="Derive from passphrase")
-    keyE.add_argument("--keyfile", default=None, help="Load key from .pkey file")
+    pr = sub.add_parser("range", help="Generate a range of SHEP64 or SHEP72 keys from a starting integer")
+    pr.add_argument("--start", type=int, required=True)
+    pr.add_argument("--hashes", type=int, required=True)
+    addModeArgs(pr)
+    pr.add_argument("--out", default=None)
+    pr.add_argument("--bare", action="store_true")
+    pr.add_argument("--progress", action="store_true")
 
-    pe.add_argument("-o", "--out", default=None, help="Output file path (or directory for file mode)")
-    pe.add_argument("--no-limit", dest="no_limit", action="store_true", help="Override 100KB file limit")
-    pe.add_argument("--quiet-key", dest="quiet_key", action="store_true", help="Do not print the key to stdout")
-    pe.add_argument("--write-key", dest="write_key", default=None, help="Write used key to .pkey file")
-    pe.add_argument("--json", action="store_true", help="Output JSON")
+    pb = sub.add_parser("bench", help="Benchmark key generation speed and optional diffusion report")
+    pb.add_argument("--start", type=int, default=None)
+    pb.add_argument("--hashes", type=int, required=True)
+    pb.add_argument("--random-inputs", dest="random_inputs", action="store_true", default=None)
+    pb.add_argument("--sequential", dest="random_inputs", action="store_false")
+    pb.add_argument("--input-bits", dest="input_bits", type=int, default=256)
+    pb.add_argument("--compare", action="store_true")
+    pb.add_argument("--out", default=None)
+    pb.add_argument("--no-progress", dest="no_progress", action="store_true")
+    addModeArgs(pb)
 
-    pd = sub.add_parser("dec", help="Decrypt file or ciphertext")
-    srcD = pd.add_mutually_exclusive_group(required=True)
-    srcD.add_argument("-f", "--file", dest="file", default=None, help="File path to decrypt (.shep32/.sh3/.sh32 or extensionless)")
-    srcD.add_argument("--text", dest="text", default=None, help="Ciphertext (base62) to decrypt")
-    srcD.add_argument("-d", dest="text", default=None, help="Alias for --text (compat)")
-    srcD.add_argument("--stdin", action="store_true", help="Read ciphertext from stdin")
+    pp = sub.add_parser("pair", help="Show the two internal 256-bit encryption keys derived from a key or source")
+    g = pp.add_mutually_exclusive_group(required=True)
+    g.add_argument("--text", default=None)
+    g.add_argument("--value", default=None)
+    g.add_argument("--file", default=None)
+    addModeArgs(pp)
+    pp.add_argument("--json", action="store_true")
 
-    pd.add_argument("--delim", default=None, help="Optional delimiter markers for stdin: DELIM:BEGIN ... DELIM:END")
+    pe = sub.add_parser("enc", help="Encrypt text or a file into a .sh32 token")
+    g = pe.add_mutually_exclusive_group(required=True)
+    g.add_argument("-f", "--file", dest="file", default=None)
+    g.add_argument("--text", dest="text", default=None)
+    g.add_argument("-e", dest="text", default=None)
+    g.add_argument("--stdin", action="store_true")
+    pe.add_argument("--delim", default=None)
+    kg = pe.add_mutually_exclusive_group(required=False)
+    kg.add_argument("--key", default=None)
+    kg.add_argument("-p", "--passphrase", default=None)
+    kg.add_argument("--keyfile", default=None)
+    pe.add_argument("--mode", type=int, default=0, help="0 = SHEP64 primary, 1 = SHEP72 extended")
+    pe.add_argument("--detached", action="store_true")
+    pe.add_argument("--no-compress", dest="no_compress", action="store_true")
+    addChunkArgs(pe)
+    pe.add_argument("--pow-bits", dest="pow_bits", type=int, default=0)
+    pe.add_argument("--pow-start", dest="pow_start", default=0)
+    pe.add_argument("-o", "--out", default=None)
+    pe.add_argument("--no-limit", dest="no_limit", action="store_true")
+    pe.add_argument("--quiet-key", dest="quiet_key", action="store_true")
+    pe.add_argument("--write-key", dest="write_key", default=None)
+    pe.add_argument("--no-progress", dest="no_progress", action="store_true")
+    pe.add_argument("--json", action="store_true")
 
-    keyD = pd.add_mutually_exclusive_group(required=True)
-    keyD.add_argument("--key", default=None, help="64-hex key")
-    keyD.add_argument("-p", "--passphrase", default=None, help="Derive from passphrase")
-    keyD.add_argument("--keyfile", default=None, help="Load key from .pkey file")
+    pd = sub.add_parser("dec", help="Decrypt a .sh32 token, detached body/meta tokens, or a token file")
+    g = pd.add_mutually_exclusive_group(required=False)
+    g.add_argument("-f", "--file", dest="file", default=None)
+    g.add_argument("--text", dest="text", default=None)
+    g.add_argument("-d", dest="text", default=None)
+    g.add_argument("--stdin", action="store_true")
+    pd.add_argument("--body", default=None)
+    pd.add_argument("--meta", default=None)
+    pd.add_argument("--delim", default=None)
+    kg = pd.add_mutually_exclusive_group(required=True)
+    kg.add_argument("--key", default=None)
+    kg.add_argument("-p", "--passphrase", default=None)
+    kg.add_argument("--keyfile", default=None)
+    pd.add_argument("--mode", type=int, default=None, help="0 = SHEP64 primary, 1 = SHEP72 extended, blank = auto-detect")
+    pd.add_argument("-o", "--out", default=None)
+    pd.add_argument("--as-text", dest="as_text", action="store_true")
+    pd.add_argument("--no-progress", dest="no_progress", action="store_true")
+    pd.add_argument("--json", action="store_true")
 
-    pd.add_argument("-o", "--out", default=None, help="Output file path (or directory for restored file)")
-    pd.add_argument("--as-text", dest="as_text", action="store_true", help="Print plaintext to stdout (for file decrypt, when not structured)")
-    pd.add_argument("--force", action="store_true", help="Ignore extension rules")
-    pd.add_argument("--json", action="store_true", help="Output JSON")
+    pg = sub.add_parser("pubkey", help="Derive an Ed25519 public key from a SHEP key source")
+    kg = pg.add_mutually_exclusive_group(required=True)
+    kg.add_argument("--key", default=None)
+    kg.add_argument("-p", "--passphrase", default=None)
+    kg.add_argument("--keyfile", default=None)
+    pg.add_argument("--mode", type=int, default=0, help="0 = SHEP64 primary, 1 = SHEP72 extended")
+    pg.add_argument("--json", action="store_true")
 
+    ps = sub.add_parser("sign", help="Sign text or file contents with the Ed25519 key derived from a SHEP key source")
+    g = ps.add_mutually_exclusive_group(required=True)
+    g.add_argument("--text", default=None)
+    g.add_argument("-f", "--file", dest="file", default=None)
+    g.add_argument("--stdin", action="store_true")
+    ps.add_argument("--delim", default=None)
+    kg = ps.add_mutually_exclusive_group(required=True)
+    kg.add_argument("--key", default=None)
+    kg.add_argument("-p", "--passphrase", default=None)
+    kg.add_argument("--keyfile", default=None)
+    ps.add_argument("--mode", type=int, default=0, help="0 = SHEP64 primary, 1 = SHEP72 extended")
+    ps.add_argument("--json", action="store_true")
+
+    pv = sub.add_parser("verify", help="Verify text or file contents with a signature and public key")
+    g = pv.add_mutually_exclusive_group(required=True)
+    g.add_argument("--text", default=None)
+    g.add_argument("-f", "--file", dest="file", default=None)
+    g.add_argument("--stdin", action="store_true")
+    pv.add_argument("--delim", default=None)
+    pv.add_argument("--signature", required=True)
+    pv.add_argument("--public-key", dest="public_key", required=True)
+    pv.add_argument("--json", action="store_true")
     return parser
-
-# =========================
-# Main entrypoint and exception routing
-
-# NOTES: Top-level command dispatch, zero-arg wizard fallback, CLI exit codes, and standardized exception handling.
-# =========================
 
 def main(argv=None):
     parser = buildParser()
     args = parser.parse_args(argv)
-
-    if args.cmd is None:
-        if argv is None and len(sys.argv) == 1:
-            return interactiveWizard()
-        parser.print_help()
-        return 2
     try:
         if args.cmd is None:
             if argv is None and len(sys.argv) == 1:
@@ -888,11 +1123,24 @@ def main(argv=None):
             return interactiveWizard()
         if args.cmd == "key":
             return cmdKey(args)
+        if args.cmd == "hash":
+            return cmdHash(args)
+        if args.cmd == "range":
+            return cmdRange(args)
+        if args.cmd == "bench":
+            return cmdBench(args)
+        if args.cmd == "pair":
+            return cmdPair(args)
         if args.cmd == "enc":
             return cmdEnc(args)
         if args.cmd == "dec":
             return cmdDec(args)
-
+        if args.cmd == "pubkey":
+            return cmdPubKey(args)
+        if args.cmd == "sign":
+            return cmdSign(args)
+        if args.cmd == "verify":
+            return cmdVerify(args)
         printErr("Unknown command.")
         return 2
     except FileNotFoundError as e:

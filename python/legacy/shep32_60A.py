@@ -1,6 +1,7 @@
+
 # =========================
 # Main imports and runtime
-# Build Version: 60D
+# Build Version: 60A
 # NOTES: Standard-library dependencies required for transforms, progress output, compression, and deterministic RNG support.
 # =========================
 
@@ -11,7 +12,7 @@ from cryptography.hazmat.primitives import serialization
 
 # =========================
 # Core constants and general helpers
-# Build Version: 60D
+# Build Version: 60A
 # NOTES: Shared character sets, caches, lightweight validation, progress helpers, and small formatting utilities.
 # =========================
 
@@ -115,7 +116,7 @@ def truncatePrefix(v, n):
 
 # =========================
 # Deterministic RNG engine
-# Build Version: 60D
+# Build Version: 60A
 # NOTES: Python-compatible MT19937-style deterministic random generator used by digit-series transforms.
 # =========================
 
@@ -234,7 +235,7 @@ class DeterministicRng32:
 
 # =========================
 # Permutation and obfuscation machinery
-# Build Version: 60D
+# Build Version: 60A
 # NOTES: Hex parsing, seed derivation, deterministic permutation, and progress-aware wrappers for chunked payload mixing.
 # =========================
 
@@ -335,7 +336,7 @@ def deobfuscateProgress(obfText, keyHex, steps, baseLabel, done, total):
 
 # =========================
 # Chunking, byte conversion, and payload framing
-# Build Version: 60D
+# Build Version: 60A
 # NOTES: Raw byte sentinel helpers, chunk splitting, one-string tail packing/parsing, and per-message seed expansion.
 # =========================
 
@@ -497,7 +498,7 @@ def parseTail(tail):
 
 # =========================
 # Shared transforms and state diffusion
-# Build Version: 60D
+# Build Version: 60A
 # NOTES: Common transforms used by the derivation path and the encryption/decryption path.
 # =========================
 
@@ -817,7 +818,7 @@ def deriveBaseFactor(hex64):
 
 # =========================
 # Hash-only key derivation and generation
-# Build Version: 60D
+# Build Version: 60A
 # NOTES: Functions unique to the personal-key hashing/generation path, plus deterministic standard and extended key generation.
 # =========================
 
@@ -1393,7 +1394,7 @@ def generateKeyFile(path, mode=0, count=8, directBits=256, laneBits=336, blockBy
 
 # =========================
 # Encryption and decryption
-# Build Version: 60D
+# Build Version: 60A
 # NOTES: Deterministic key normalization, one-string randomized envelope, strict authentication, and chunked encryption/decryption.
 # =========================
 
@@ -1693,14 +1694,12 @@ def decodeEnvelope(token):
     bodyPacked = payload[4 + n:].decode("ascii")
     return parseJson(headerBytes.decode("utf-8")), bodyPacked
 
-def encryptData(n, k=None, keyMode=0, count=8, detached=False, compress=True, chunkSize=2048, powBits=0, powStart=0, saltHex=None, nonceHex=None, ivHex=None, progress=None):
+def encryptData(n, k=None, keyMode=0, count=8, detached=False, compress=True, chunkSize=2048, powBits=0, powStart=0, saltHex=None, nonceHex=None, ivHex=None):
     if not isinstance(n, str):
         raise ValueError("encryptData expects a string")
 
     keyMode = int(keyMode)
     modeMarker = 0 if keyMode == 0 else 333
-    if progress:
-        progress(0, 6, "preparing")
     hKey, kdfId = resolveKey(k, True, keyMode, count)
 
     msgSeedDec = deriveWrapSeed()
@@ -1714,10 +1713,6 @@ def encryptData(n, k=None, keyMode=0, count=8, detached=False, compress=True, ch
     rawBytes = n.encode("utf-16-le", errors="surrogatepass")
     compBytes = zlib.compress(rawBytes, 9) if compress else rawBytes
     parts = splitByteBlocks(compBytes, int(chunkSize))
-    total = len(parts) + 5
-    if progress:
-        progress(1, total, "deriving keys")
-        progress(2, total, "packing payload")
 
     cipherParts = []
     lens = []
@@ -1739,8 +1734,6 @@ def encryptData(n, k=None, keyMode=0, count=8, detached=False, compress=True, ch
         packed = packPortableBytes(cPart)
         cipherParts.append(packed)
         lens.append(len(packed))
-        if progress:
-            progress(3 + idx, total, f"encrypting chunk {idx + 1}/{len(parts)}")
 
     bodyPacked = "".join(cipherParts)
     meta = {
@@ -1765,21 +1758,16 @@ def encryptData(n, k=None, keyMode=0, count=8, detached=False, compress=True, ch
     }
     meta["verify"] = computeVerifyToken(msgKeys["verifyRoot"], meta)
     meta["authTag"] = computeAuthTag(msgKeys["authRoot"], meta, bodyPacked, int(detached))
-    if progress:
-        progress(total - 1, total, "finalizing")
     if int(powBits) > 0:
         meta["powNonce"], meta["powHash"] = solvePow(meta, bodyPacked, int(powBits), int(powStart))
     else:
         meta["powNonce"], meta["powHash"] = 0, ""
 
-    out = {"meta": packPortableBytes(buildMetaCore(meta).encode("utf-8")), "body": bodyPacked} if detached else encodeEnvelope(meta, bodyPacked)
-    if progress:
-        progress(total, total, "done")
-    return out, hKey
+    if detached:
+        return {"meta": packPortableBytes(buildMetaCore(meta).encode("utf-8")), "body": bodyPacked}, hKey
+    return encodeEnvelope(meta, bodyPacked), hKey
 
-def decryptData(n, k, keyMode=None, count=8, meta=None, progress=None):
-    if progress:
-        progress(0, 6, "reading input")
+def decryptData(n, k, keyMode=None, count=8, meta=None):
     if isinstance(n, dict):
         metaObj = parseJson(unpackPortableBytes(n["meta"]).decode("utf-8"))
         bodyPacked = n["body"]
@@ -1797,8 +1785,6 @@ def decryptData(n, k, keyMode=None, count=8, meta=None, progress=None):
     nonceHex = metaObj["nonceHex"]
     ivHex = metaObj["ivHex"]
     msgKeys = deriveMessageKeys(hKey, saltHex, nonceHex, ivHex, resolvedMode, int(metaObj.get("count", count)))
-    if progress:
-        progress(1, 6, "deriving keys")
 
     expectVerify = computeVerifyToken(msgKeys["verifyRoot"], metaObj)
     if not verifyEqual(expectVerify, metaObj.get("verify", "")):
@@ -1819,9 +1805,6 @@ def decryptData(n, k, keyMode=None, count=8, meta=None, progress=None):
         pos += int(L)
     if pos != len(bodyPacked):
         raise ValueError("wrong key or damaged ciphertext")
-    total = len(parts) + 5
-    if progress:
-        progress(2, total, "verifying envelope")
 
     compOut = bytearray()
     metaAad = {
@@ -1840,21 +1823,11 @@ def decryptData(n, k, keyMode=None, count=8, meta=None, progress=None):
         chunkNonce = deriveChunkNonce(msgKeys["nonceRoot"], idx, saltHex, nonceHex, ivHex)
         plain = xChaCha20Poly1305Decrypt(chunkKey, chunkNonce, unpackPortableBytes(packed), buildChunkAad(metaAad, idx))
         compOut.extend(plain)
-        if progress:
-            progress(3 + idx, total, f"decrypting chunk {idx + 1}/{len(parts)}")
 
     rawBytes = bytes(compOut)
     if int(metaObj.get("cmp", 0)) == 1:
-        if progress:
-            progress(total - 1, total, "decompressing")
         rawBytes = zlib.decompress(rawBytes)
-    else:
-        if progress:
-            progress(total - 1, total, "finalizing")
-    out = decodeSafeText(rawBytes)
-    if progress:
-        progress(total, total, "done")
-    return out
+    return decodeSafeText(rawBytes)
 
 def generatePublicKey(k, keyMode=0, count=8):
     hKey, _ = resolveKey(k, False if k is not None else True, keyMode, count)
@@ -1881,67 +1854,3 @@ def verifySignature(data, signature, publicKey):
         return True
     except Exception:
         return False
-
-# =========================
-# Validation and diagnostics
-# Build Version: 60D
-# NOTES: Focused regression for key generation, dual-key derivation, AEAD, signatures, and proof-of-work.
-# =========================
-
-def printSelfChecks():
-    tests = []
-    def ok(name, cond, detail=""):
-        tests.append((name, bool(cond), detail))
-
-    key0 = generateKey("Andrew Lehti", 0)
-    key1 = generateKey("Andrew Lehti", 1)
-    ok("generateKey/mode0", isHex64(key0), key0)
-    ok("generateKey/mode1", isExtendedKey(key1), key1)
-
-    pair0 = computeKeyPair(key0, 0, 8)
-    pair1 = computeKeyPair(key1, 333, 8)
-    ok("computeKeyPair/mode0", isHex64(pair0["key1"]) and isHex64(pair0["key2"]), pair0)
-    ok("computeKeyPair/mode1", isHex64(pair1["key1"]) and isHex64(pair1["key2"]), pair1["key1"] + ":" + pair1["key2"])
-
-    pt = "hello world\nAndrew Lehti\n🙂"
-    c0, hk0 = encryptData(pt, "Andrew Lehti", 0, 8, False, True, 128, 0)
-    ok("encrypt/transport0", all(ch.isalnum() for ch in c0), len(c0))
-    ok("decrypt/roundtrip0", decryptData(c0, hk0) == pt, "mode0")
-
-    c1, hk1 = encryptData(pt, key1, 1, 8, False, True, 128, 0)
-    ok("encrypt/transport1", all(ch.isalnum() for ch in c1), len(c1))
-    ok("decrypt/roundtrip1", decryptData(c1, hk1, 1, 8) == pt, "mode1")
-
-    det, hkd = encryptData("detached payload", "Andrew", 0, 8, True, True, 128, 0)
-    ok("encrypt/detached-transport", all(ch.isalnum() for ch in det["meta"]) and all(ch.isalnum() for ch in det["body"]), det)
-    ok("decrypt/detached", decryptData(det, hkd) == "detached payload", "detached")
-
-    cPow, hPow = encryptData("pow payload", "Andrew", 0, 8, False, True, 128, 10)
-    metaPow, bodyPow = decodeEnvelope(cPow)
-    ok("pow/verify", verifyPow(metaPow, bodyPow), metaPow.get("powHash", ""))
-    ok("decrypt/pow", decryptData(cPow, hPow) == "pow payload", "pow")
-
-    sig = signData("signed message", "Andrew Lehti", 0, 8)
-    ok("sign/verify", verifySignature("signed message", sig["signature"], sig["publicKey"]), sig)
-    ok("publicKey/base62", all(ch.isalnum() for ch in generatePublicKey("Andrew Lehti", 0, 8)), "pub")
-
-    try:
-        decryptData(c0, "wrong key")
-        ok("wrong-key/fail", False, "unexpected success")
-    except Exception as e:
-        ok("wrong-key/fail", True, type(e).__name__)
-
-    tampered = c0[:-1] + ("0" if c0[-1] != "0" else "1")
-    try:
-        decryptData(tampered, hk0)
-        ok("tamper/fail", False, "unexpected success")
-    except Exception as e:
-        ok("tamper/fail", True, type(e).__name__)
-
-    passed = sum(1 for _, cond, _ in tests if cond)
-    failed = len(tests) - passed
-    for name, cond, detail in tests:
-        print(("PASS" if cond else "FAIL") + " | " + name + (" | " + str(detail) if detail != "" else ""))
-    print("passed=", passed)
-    print("failed=", failed)
-    return {"passed": passed, "failed": failed, "tests": tests}
