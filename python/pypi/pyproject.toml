@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shep32"
+version = "2.61.0"
+description = "SHEP64 and SHEP333 key generation, encryption, signing, and CLI tooling"
+readme = "README.md"
+requires-python = ">=3.10"
+
+license = "MIT"
+license-files = ["LICENSE"]
+
+authors = [
+  { name = "Andrew Lehti" }
+]
+
+keywords = ["shep32", "shep333", "crypto", "cli", "encryption", "signing", "hashing"]
+
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: OS Independent",
+  "Intended Audience :: Developers",
+  "Environment :: Console",
+  "Topic :: Security :: Cryptography",
+]
+
+dependencies = [
+  "cryptography>=42.0.0"
+]
+
+[project.urls]
+Homepage = "http://metopedia.com"
+Source = "https://github.com/andylehti/SHEP32"
+
+[project.scripts]
+shep32 = "shep32.cli:main"
+pyshep = "shep32.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+include-package-data = false
+
+[tool.setuptools.packages.find]
+where = ["src"]
