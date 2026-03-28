@@ -16,9 +16,12 @@ SHEP32 is the primary output format. It is a **32-byte** value, normally shown a
 
 #### Example SHEP32 Keys
 
-```shep32 --start 0 --hashes 10```
+```
+shep32 --start 0 --hashes 10
+```
 
-```0 = c245c2a9291fa37a8dc8c74feeabc1d03c09de371705c85d043a79568bf9fc91
+```
+0 = c245c2a9291fa37a8dc8c74feeabc1d03c09de371705c85d043a79568bf9fc91
 1 = 43b5e6ddd9983bc6dc899f35ee32b2b2a8afe86bbcc814f67fbb8068225ad079
 2 = 41902472cf371a16cd98117d473784fc6cb6d2e74d91c03b77a2bece6138cec3
 3 = 1641e53ec94c8762306661dccfdf84a8badcb4db932f2b86c321e7d3cf772209
@@ -27,7 +30,8 @@ SHEP32 is the primary output format. It is a **32-byte** value, normally shown a
 6 = 98d2a120aa4502fda77d9a384d5b06f6f880d552c039d498c5c0426197e0eed5
 7 = 9e033ee5f8980b8ec2287c3460aed517f34f5c534bd78b1d267ebea8ed1f1b63
 8 = 1a733470dddc389daddd4714cbb5d9d67a3163278cb26ff3cbac793fdaf44e93
-9 = 9faa4975b259e975592c44c8544725d945c21a87c66348620632d38beff7a591```
+9 = 9faa4975b259e975592c44c8544725d945c21a87c66348620632d38beff7a591
+```
 
 ### SHEP333
 
@@ -47,9 +51,12 @@ The result is an aesthetic key that is 77 bits larger than standard 256 bit hash
 
 #### Example Extended SHEP333 Keys
 
-```shep32 --mode 1 --start 0 --hashes 10```
+```
+shep32 --mode 1 --start 0 --hashes 10
+```
 
-```0 = 3b397f62Y4aad6b708c644c76H1459f68f5c36a50712A6IC41d6e151dQca2R921fm422ea
+```
+0 = 3b397f62Y4aad6b708c644c76H1459f68f5c36a50712A6IC41d6e151dQca2R921fm422ea
 1 = ucl70d48ap296075b9ef1dlbd6dfaf7043a5Bc267ebZd2cBaa6a05efaa2596dn1004b873
 2 = 86e03fa76bXl43ba191b8e58e0SDA3fc38685450c25Y377o67f6ff3c8071f229acedOd1b
 3 = 7fbb8bc13bfd696fc44aa11D49aqb5eF7awdN585de24d277be0M1f4kf97b2Jb61239d1c7
@@ -58,7 +65,8 @@ The result is an aesthetic key that is 77 bits larger than standard 256 bit hash
 6 = a2JVc2e7o722Qc081gd1c9z3k7be930c1cbdcd7ebbeaf9a0c92375394d838671b40k9356
 7 = 95fbc60see7f31c1c87cf7id5Ee1f453X5IZ7175i790fb4Ved6215d148207fef9074af02
 8 = T992c74cc2afdM84d9a702ac5fGbc5ak9440437S337ap29776000e80079b9159dAC94f61
-9 = d03f6b48s7656Y6fO7e12bt6f928100584f99367803db1b5Ucxec0c1cyc9c293x3fe3b1a```
+9 = d03f6b48s7656Y6fO7e12bt6f928100584f99367803db1b5Ucxec0c1cyc9c293x3fe3b1a
+```
 
 ## What the code actually does
 
@@ -569,4 +577,4 @@ cd cpp
 
 ## License
 
-MIT. See `LICENSE`.
+[MIT License](https://github.com/andylehti/SHEP32/blob/main/LICENSE)
