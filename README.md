@@ -17,7 +17,7 @@ SHEP32 is the primary output format. It is a **32-byte** value, normally shown a
 #### Example SHEP32 Keys
 
 ```
-shep32 --start 0 --hashes 10
+shep32 range --start 0 --hashes 10
 ```
 
 ```
@@ -52,7 +52,7 @@ The result is an aesthetic key that is 77 bits larger than standard 256 bit hash
 #### Example Extended SHEP333 Keys
 
 ```
-shep32 --mode 1 --start 0 --hashes 10
+shep32 range --mode 1 --hashes 10 --start 0
 ```
 
 ```
