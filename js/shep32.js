@@ -1459,9 +1459,9 @@ function printHelpText(exe) {
   ${exe} --body BODY --meta META --key KEY [options]
 
 Hash inputs:
-  --text TEXT         Generate a SHEP64 or SHEP72 key from UTF-8 text
-  --value INT         Generate a SHEP64 or SHEP72 key from a decimal integer
-  --file PATH         Generate a SHEP64 or SHEP72 key from file contents
+  --text TEXT         Generate a SHEP64 or SHEP333 key from UTF-8 text
+  --value INT         Generate a SHEP64 or SHEP333 key from a decimal integer
+  --file PATH         Generate a SHEP64 or SHEP333 key from file contents
   --start INT         Starting integer for range generation
   --hashes N          Number of keys to generate from --start
   --out PATH          Write range or cipher output to file
@@ -1496,7 +1496,7 @@ Other features:
   --pair              Print the internal encryption key pair
 
 General options:
-  --mode N            0 = SHEP64 primary, 1 = SHEP72 extended
+  --mode N            0 = SHEP64 primary, 1 = SHEP333 extended
   --direct-bits N     Direct-route threshold bits (default 256)
   --lane-bits N       Reserved compatibility option (default 336)
   --block-bytes N     Reserved compatibility option (default 4096 or 65536 for files)

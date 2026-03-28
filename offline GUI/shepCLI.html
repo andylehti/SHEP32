@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Universal Auto-GUI Builder</title>
+    
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    
+    <!-- Babel for in-browser JSX compilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, useRef } = React;
+
+        // --- Core Parsing Logic ---
+        
+        // Extracts argument names from a function's string representation
+        function getArgs(func) {
+            const str = func.toString().replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '').replace(/\n/g, ' ');
+            
+            let match = str.match(/^(?:async\s+)?function(?:\s+\w+)?\s*\(([^)]*)\)/);
+            if (match) return parseArgString(match[1]);
+            
+            match = str.match(/^(?:async\s+)?(?:\*?\s*)?[a-zA-Z_$][0-9a-zA-Z_$]*\s*\(([^)]*)\)\s*\{/);
+            if (match) return parseArgString(match[1]);
+
+            match = str.match(/^(?:async\s+)?\(([^)]*)\)\s*=>/);
+            if (match) return parseArgString(match[1]);
+            
+            match = str.match(/^(?:async\s+)?([a-zA-Z_$][0-9a-zA-Z_$]*)\s*=>/);
+            if (match) return [match[1]];
+
+            return [];
+        }
+
+        function parseArgString(str) {
+            return str.split(',')
+                .map(s => s.trim().split('=')[0].trim()) // handle default params
+                .map(s => s.split(':')[0].trim()) // remove ts types
+                .map(s => s.replace(/^[.{3}]+/, '')) // remove rest operator ...
+                .filter(s => s && !s.startsWith('//') && !s.startsWith('/*'));
+        }
+
+        // Dynamically loads and analyzes the SHEP32 JS file
+        async function loadShep32Script(url) {
+            let fetchUrl = url;
+            if (fetchUrl.includes('github.com') && !fetchUrl.includes('raw.githubusercontent.com')) {
+                fetchUrl = fetchUrl.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
+            }
+
+            const res = await fetch(fetchUrl);
+            if (!res.ok) throw new Error(`Failed to fetch script: ${res.statusText}`);
+            const text = await res.text();
+            
+            await new Promise((resolve, reject) => {
+                try {
+                    const scriptEl = document.createElement('script');
+                    scriptEl.text = text;
+                    document.body.appendChild(scriptEl);
+                    resolve();
+                } catch(e) {
+                    reject(e);
+                }
+            });
+            
+            if (!window.SHEP32) {
+                throw new Error("SHEP32 object not found on window after evaluating script. Check if the script is the correct SHEP32 library.");
+            }
+
+            const apiObj = window.SHEP32;
+            let funcs = [];
+            for (const [key, value] of Object.entries(apiObj)) {
+                if (typeof value === 'function') {
+                    funcs.push({ name: key, func: value, params: getArgs(value), context: apiObj });
+                }
+            }
+            
+            return { api: apiObj, funcs };
+        }
+
+        // --- UI Components ---
+
+        const Icons = {
+            Terminal: () => (
+                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-indigo-600">
+                    <polyline points="4 17 10 11 4 5"></polyline>
+                    <line x1="12" y1="19" x2="20" y2="19"></line>
+                </svg>
+            ),
+            Code: () => (
+                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-indigo-600">
+                    <polyline points="16 18 22 12 16 6"></polyline>
+                    <polyline points="8 6 2 12 8 18"></polyline>
+                </svg>
+            ),
+            Play: () => (
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                </svg>
+            ),
+            Check: () => (
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+            ),
+            Cross: () => (
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            )
+        };
+
+        const CliRunner = ({ shep32Api }) => {
+            const [cmd, setCmd] = useState('--text "hello world"');
+            const [files, setFiles] = useState({});
+            const [result, setResult] = useState(null);
+            const [running, setRunning] = useState(false);
+            const fileInputRef = useRef(null);
+
+            const handleFileUpload = async (e) => {
+                const newFiles = { ...files };
+                for (const file of e.target.files) {
+                    const buf = await file.arrayBuffer();
+                    newFiles[file.name] = new Uint8Array(buf);
+                }
+                setFiles(newFiles);
+                if(fileInputRef.current) fileInputRef.current.value = '';
+            };
+
+            const removeFile = (name) => {
+                const newFiles = { ...files };
+                delete newFiles[name];
+                setFiles(newFiles);
+            };
+
+            const execute = async () => {
+                setRunning(true);
+                setResult(null);
+                try {
+                    const res = await shep32Api.runCli(cmd, { files });
+                    setResult(res);
+                } catch (err) {
+                    setResult({ error: err.toString() });
+                }
+                setRunning(false);
+            };
+
+            const downloadFile = (name, data) => {
+                const blob = new Blob([data]);
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = name;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            };
+
+            return (
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                    <h3 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
+                        <Icons.Terminal /> CLI Command Runner
+                    </h3>
+                    <div className="mb-4">
+                        <label className="block text-sm font-semibold text-slate-600 mb-1.5">Command Arguments</label>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                            <input 
+                                type="text" 
+                                className="flex-grow bg-slate-50 font-mono border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                                placeholder="e.g. --encrypt-file sample.txt --key secret"
+                                value={cmd}
+                                onChange={e => setCmd(e.target.value)}
+                                onKeyDown={e => e.key === 'Enter' && execute()}
+                            />
+                            <button 
+                                onClick={execute}
+                                disabled={running}
+                                className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white px-8 py-3 rounded-lg font-semibold transition-colors whitespace-nowrap"
+                            >
+                                {running ? 'Running...' : 'Execute CLI'}
+                            </button>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-2">Try: <code className="bg-slate-100 px-1 rounded">--text "abc"</code> or <code className="bg-slate-100 px-1 rounded">--help</code></p>
+                    </div>
+                    
+                    <div className="mb-6 bg-slate-50 p-4 rounded-xl border border-dashed border-slate-300">
+                        <label className="block text-sm font-semibold text-slate-700 mb-1.5">Virtual File System (ctx.files)</label>
+                        <p className="text-xs text-slate-500 mb-3">Upload files here to use them in commands like <code className="bg-slate-200 px-1 rounded text-slate-600">--encrypt-file filename.txt</code></p>
+                        <div className="flex items-center gap-4 mb-3">
+                            <input 
+                                type="file" 
+                                multiple 
+                                onChange={handleFileUpload} 
+                                ref={fileInputRef}
+                                className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-100 file:text-indigo-700 hover:file:bg-indigo-200 cursor-pointer"
+                            />
+                        </div>
+                        {Object.keys(files).length > 0 && (
+                            <div className="flex flex-wrap gap-2 mt-4">
+                                {Object.entries(files).map(([name, data]) => (
+                                    <div key={name} className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200 text-sm shadow-sm">
+                                        <span className="font-mono text-slate-700">{name} <span className="text-xs text-slate-400">({data.length} bytes)</span></span>
+                                        <button onClick={() => removeFile(name)} className="text-red-500 hover:text-red-700 font-bold ml-2 text-lg leading-none">&times;</button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {result && (
+                        <div className="mt-6 border-t border-slate-200 pt-6">
+                            <h4 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-3">Execution Output</h4>
+                            {result.error ? (
+                                <div className="bg-red-50 text-red-700 p-4 rounded-lg font-mono text-sm overflow-auto max-h-64 whitespace-pre-wrap border border-red-200">
+                                    {result.error}
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    {(result.stdout || result.stderr) ? (
+                                        <div className="bg-slate-900 text-slate-50 p-4 rounded-lg font-mono text-sm overflow-auto max-h-96 whitespace-pre-wrap shadow-inner relative">
+                                            {result.stdout && <div>{result.stdout}</div>}
+                                            {result.stderr && <div className="text-red-400">{result.stderr}</div>}
+                                            <div className="absolute top-2 right-2 text-slate-500 text-xs font-sans bg-slate-800 px-2 py-1 rounded">Exit: {result.exitCode}</div>
+                                        </div>
+                                    ) : (
+                                        <div className="bg-slate-100 text-slate-500 p-4 rounded-lg text-sm italic border border-slate-200">Command executed successfully with no console output.</div>
+                                    )}
+                                    {result.files && Object.keys(result.files).length > 0 && (
+                                        <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-xl">
+                                            <h5 className="text-sm font-semibold text-emerald-800 mb-3">Generated / Modified Files</h5>
+                                            <div className="flex flex-col gap-2">
+                                                {Object.entries(result.files).map(([name, data]) => (
+                                                    <div key={name} className="flex items-center justify-between bg-white border border-emerald-200 p-3 rounded-lg shadow-sm">
+                                                        <span className="font-mono text-slate-800 text-sm">{name} <span className="text-xs text-slate-500 ml-1">({data.length} bytes)</span></span>
+                                                        <button 
+                                                            onClick={() => downloadFile(name, data)}
+                                                            className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm"
+                                                        >
+                                                            Download File
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const FunctionCard = ({ funcDef }) => {
+            const [args, setArgs] = useState(funcDef.params.reduce((acc, param) => ({ ...acc, [param]: '' }), {}));
+            const [result, setResult] = useState(null);
+            const [error, setError] = useState(null);
+            const [status, setStatus] = useState('idle'); // idle, success, error
+
+            const execute = async () => {
+                setResult(null);
+                setError(null);
+                setStatus('idle');
+                try {
+                    const parsedArgs = funcDef.params.map(param => {
+                        const val = args[param];
+                        if (val === '') return undefined;
+                        try {
+                            return JSON.parse(val);
+                        } catch (e) {
+                            return val; // Fallback to raw string
+                        }
+                    });
+
+                    let res = funcDef.func.apply(funcDef.context, parsedArgs);
+                    if (res instanceof Promise) {
+                        res = await res;
+                    }
+                    
+                    if (typeof res === 'object') {
+                        // Automatically handle Uint8Array returns for easier reading
+                        if (res instanceof Uint8Array) {
+                            setResult(`Uint8Array(${res.length}) [${res.slice(0, 20).join(', ')}${res.length > 20 ? '...' : ''}]`);
+                        } else {
+                            setResult(JSON.stringify(res, null, 2));
+                        }
+                    } else if (res === undefined) {
+                        setResult('undefined');
+                    } else {
+                        setResult(String(res));
+                    }
+                    setStatus('success');
+                } catch (e) {
+                    setError(e.toString());
+                    setStatus('error');
+                }
+            };
+
+            return (
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow duration-200 flex flex-col">
+                    <div className="flex justify-between items-start mb-4">
+                        <h3 className="text-lg font-bold text-slate-800 font-mono break-all pr-4">
+                            <span className="text-indigo-600 font-semibold">{funcDef.name}</span>()
+                        </h3>
+                        {status === 'success' && <Icons.Check />}
+                        {status === 'error' && <Icons.Cross />}
+                    </div>
+
+                    <div className="space-y-4 mb-6 flex-grow">
+                        {funcDef.params.map(param => (
+                            <div key={param}>
+                                <label className="block text-sm font-semibold text-slate-600 mb-1.5">{param}</label>
+                                <input 
+                                    type="text" 
+                                    className="w-full bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 p-2.5 text-sm transition-colors outline-none font-mono"
+                                    placeholder={`Enter ${param}...`}
+                                    value={args[param]}
+                                    onChange={e => setArgs({...args, [param]: e.target.value})}
+                                />
+                            </div>
+                        ))}
+                        {funcDef.params.length === 0 && (
+                            <div className="h-full flex items-center justify-center p-4 bg-slate-50 border border-dashed border-slate-300 rounded-lg">
+                                <p className="text-sm text-slate-500 italic">This function takes no arguments.</p>
+                            </div>
+                        )}
+                    </div>
+
+                    <button 
+                        onClick={execute}
+                        className="flex items-center justify-center w-full bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-lg font-medium transition-colors shadow-sm"
+                    >
+                        <Icons.Play />
+                        Execute
+                    </button>
+                    
+                    {(result !== null || error !== null) && (
+                        <div className={`mt-4 p-4 rounded-lg border custom-scrollbar overflow-auto max-h-48 ${error ? 'bg-red-50 border-red-200' : 'bg-slate-50 border-slate-200'}`}>
+                            <span className={`text-[10px] font-bold uppercase tracking-wider ${error ? 'text-red-500' : 'text-slate-500'}`}>
+                                {error ? 'Error Output' : 'Return Value'}
+                            </span>
+                            {error ? (
+                                <pre className="text-red-700 whitespace-pre-wrap text-sm mt-1.5 font-mono">{error}</pre>
+                            ) : (
+                                <pre className="text-slate-800 whitespace-pre-wrap text-sm mt-1.5 font-mono">{result}</pre>
+                            )}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const App = () => {
+            const defaultUrl = 'https://raw.githubusercontent.com/andylehti/SHEP32/refs/heads/main/js/shep32.js';
+            const [url, setUrl] = useState(defaultUrl);
+            const [functions, setFunctions] = useState([]);
+            const [shepApi, setShepApi] = useState(null);
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState(null);
+            const [hasLoaded, setHasLoaded] = useState(false);
+            const [viewMode, setViewMode] = useState('cli'); // 'cli' or 'api'
+
+            const handleLoad = useCallback(async (targetUrl) => {
+                if (!targetUrl) return;
+                setLoading(true);
+                setError(null);
+                setFunctions([]);
+                setShepApi(null);
+                try {
+                    const { api, funcs } = await loadShep32Script(targetUrl);
+                    if (funcs.length === 0) {
+                        setError("Script loaded successfully, but no exportable functions were found on SHEP32.");
+                    } else {
+                        setShepApi(api);
+                        setFunctions(funcs);
+                        setHasLoaded(true);
+                    }
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            }, []);
+
+            // Auto-load the default script on mount
+            useEffect(() => {
+                handleLoad(defaultUrl);
+            }, [handleLoad]);
+
+            return (
+                <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+                    {/* Header Section */}
+                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8 mb-8">
+                        <div className="flex items-center gap-4 mb-6">
+                            <div className="p-3 bg-indigo-50 rounded-xl">
+                                <Icons.Terminal />
+                            </div>
+                            <div>
+                                <h1 className="text-2xl font-bold text-slate-900">SHEP32 GUI Builder</h1>
+                                <p className="text-slate-500 text-sm mt-1">Interactive CLI & API explorer natively wrapping the SHEP32 library.</p>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row gap-3">
+                            <input 
+                                type="text" 
+                                value={url}
+                                onChange={(e) => setUrl(e.target.value)}
+                                placeholder="Paste raw JS file URL (e.g., https://raw.githubusercontent.com/...)"
+                                className="flex-grow bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors text-sm"
+                                onKeyDown={(e) => e.key === 'Enter' && handleLoad(url)}
+                            />
+                            <button 
+                                onClick={() => handleLoad(url)}
+                                disabled={loading}
+                                className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white px-8 py-3 rounded-xl font-semibold transition-colors flex items-center justify-center whitespace-nowrap shadow-sm"
+                            >
+                                {loading ? (
+                                    <span className="flex items-center">
+                                        <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                        Loading Script...
+                                    </span>
+                                ) : 'Load Script'}
+                            </button>
+                        </div>
+
+                        {error && (
+                            <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3">
+                                <Icons.Cross />
+                                <p className="text-red-700 font-medium text-sm pt-0.5">{error}</p>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Mode Switcher */}
+                    {hasLoaded && !loading && (
+                        <div className="mb-6 flex gap-3">
+                            <button 
+                                onClick={() => setViewMode('cli')}
+                                className={`px-6 py-2.5 rounded-lg font-semibold transition-all ${viewMode === 'cli' ? 'bg-slate-900 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-300 hover:bg-slate-50 hover:text-slate-900'}`}
+                            >
+                                CLI Runner (runCli)
+                            </button>
+                            <button 
+                                onClick={() => setViewMode('api')}
+                                className={`px-6 py-2.5 rounded-lg font-semibold transition-all ${viewMode === 'api' ? 'bg-slate-900 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-300 hover:bg-slate-50 hover:text-slate-900'}`}
+                            >
+                                API Explorer ({functions.length} functions)
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Views */}
+                    {hasLoaded && !loading && viewMode === 'cli' && shepApi && (
+                        <CliRunner shep32Api={shepApi} />
+                    )}
+
+                    {hasLoaded && !loading && viewMode === 'api' && functions.length > 0 && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                            {functions.map((funcDef, idx) => (
+                                <FunctionCard key={idx} funcDef={funcDef} />
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

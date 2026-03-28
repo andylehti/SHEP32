@@ -4,715 +4,77 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SHEP-32 Encryption Protocol</title>
+    
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+    
+    <!-- Polyfill for process.hrtime.bigint() required by SHEP32 in browser environments -->
+    <script>
+        if (typeof window.process === 'undefined') {
+            window.process = {
+                env: {},
+                versions: {},
+                hrtime: {
+                    bigint: function() {
+                        return BigInt(Date.now()) * 1000000n + BigInt(Math.floor(performance.now() * 1000));
+                    }
+                }
+            };
+        } else if (!window.process.hrtime) {
+            window.process.hrtime = {
+                bigint: function() {
+                    return BigInt(Date.now()) * 1000000n + BigInt(Math.floor(performance.now() * 1000));
+                }
+            };
+        }
+    </script>
+
+    <!-- Core SHEP32 Module -->
+    <script src="https://raw.githubusercontent.com/andylehti/SHEP32/main/js/shep32.js"></script>
+
+    <style>
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #52525b; }
+    </style>
 </head>
-<body class="bg-zinc-950 text-zinc-300 font-sans selection:bg-cyan-500/30">
+<body class="bg-zinc-950 text-zinc-300 font-sans selection:bg-cyan-500/30 min-h-screen">
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect, useRef, useCallback } = React;
 
-        // --- INLINE ICONS ---
-        const Shield = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>;
-        const Copy = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>;
-        const Check = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>;
-        const Lock = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>;
-        const Unlock = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>;
-        const KeyIcon = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path></svg>;
-        const Download = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>;
-        const Upload = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>;
-        const Info = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>;
-        const Eye = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>;
-        const EyeOff = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>;
-        const X = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>;
-        const FileText = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>;
-        const RefreshCw = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>;
-        const Github = (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>;
-        
-        /**
-         * CORE LOGIC - SHEP-32 MATH UTILS
-         */
-        function bigIntPow(base, exp) {
-            let b = BigInt(base);
-            let e = BigInt(exp);
-            let res = BigInt(1);
-            while (e > BigInt(0)) {
-                if (e % BigInt(2) === BigInt(1)) res *= b;
-                b *= b;
-                e /= BigInt(2);
-            }
-            return res;
-        }
-
-        function pyMod(n, m) {
-            const bn = BigInt(n);
-            const bm = BigInt(m);
-            return ((bn % bm) + bm) % bm;
-        }
-
-        const PI = 3.141592653589793;
-        const gCharBase = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.:;<>?@[]^&()*$%/\\`\"',_!#";
-        const ten79 = bigIntPow(10, 79);
-        const digits16 = "0123456789abcdef";
-        const tDecCache = new Map();
-
-        function gChar(c) { return gCharBase.slice(0, Number(c)); }
-
-        function splitWs(s) {
-            const str = String(s);
-            const words = [];
-            let cur = "";
-            for (let i = 0; i < str.length; i++) {
-                const ch = str[i];
-                if (ch <= " ") {
-                    if (cur.length) { words.push(cur); cur = ""; }
-                } else { cur += ch; }
-            }
-            if (cur.length) words.push(cur);
-            return words;
-        }
-
-        function parseDec(s) {
-            if (!s) return BigInt(0);
-            let res = BigInt(0);
-            for (let i = 0; i < s.length; i++) {
-                const d = s.charCodeAt(i) - 48;
-                res = res * BigInt(10) + BigInt(d);
-            }
-            return res;
-        }
-
-        function parseHex(s) {
-            let res = BigInt(0);
-            const clean = String(s).toLowerCase();
-            for (let i = 0; i < clean.length; i++) {
-                const o = clean.charCodeAt(i);
-                let v = (o >= 48 && o <= 57) ? o - 48 : 10 + (o - 97);
-                res = res * BigInt(16) + BigInt(v);
-            }
-            return res;
-        }
-
-        function toHexSmall(n) {
-            let x = BigInt(n);
-            if (x === BigInt(0)) return "0";
-            let out = "";
-            while (x > BigInt(0)) {
-                out = digits16[Number(x % BigInt(16))] + out;
-                x /= BigInt(16);
-            }
-            return out;
-        }
-
-        function hexLower(n) {
-            let x = BigInt(n);
-            if (x === BigInt(0)) return "0";
-            const base = bigIntPow(16, 6);
-            const chunks = [];
-            while (x > BigInt(0)) { chunks.push(x % base); x /= base; }
-            chunks.reverse();
-            let out = toHexSmall(chunks[0]);
-            for (let i = 1; i < chunks.length; i++) {
-                out += toHexSmall(chunks[i]).padStart(6, "0");
-            }
-            return out;
-        }
-
-        function toBinSmall(n) {
-            let x = BigInt(n);
-            if (x === BigInt(0)) return "0";
-            let out = "";
-            while (x > BigInt(0)) {
-                out = (x % BigInt(2) === BigInt(0) ? "0" : "1") + out;
-                x /= BigInt(2);
-            }
-            return out;
-        }
-
-        function toBin(n) {
-            let x = BigInt(n);
-            if (x === BigInt(0)) return "0";
-            const base = bigIntPow(2, 30);
-            const chunks = [];
-            while (x > BigInt(0)) { chunks.push(x % base); x /= base; }
-            chunks.reverse();
-            let out = toBinSmall(chunks[0]);
-            for (let i = 1; i < chunks.length; i++) {
-                out += toBinSmall(chunks[i]).padStart(30, "0");
-            }
-            return out;
-        }
-
-        function binTail(n) {
-            const b = toBin(BigInt(n));
-            return b.length <= 1 ? "" : b.slice(1);
-        }
-
-        function parseBase2(s) {
-            let res = BigInt(0);
-            for (let ch of s) {
-                res = res * BigInt(2) + (ch === "1" ? BigInt(1) : BigInt(0));
-            }
-            return res;
-        }
-
-        class DeterministicRng32 {
-            constructor(seedValue = BigInt(1)) {
-                this.n = 624;
-                this.m = 397;
-                this.matrixA = BigInt(0x9908b0df);
-                this.upperMask = BigInt(0x80000000);
-                this.lowerMask = BigInt(0x7fffffff);
-                this.mt = new Array(this.n).fill(BigInt(0));
-                this.mti = this.n + 1;
-                this.setSeed(seedValue);
-            }
-            setSeed(seedValue) {
-                let x = BigInt(seedValue);
-                if (x < BigInt(0)) x = -x;
-                const key = [];
-                const base = BigInt(4294967296);
-                while (x > BigInt(0)) { key.push(x % base); x /= base; }
-                if (!key.length) key.push(BigInt(0));
-                this.initByArray(key);
-            }
-            initGenrand(s) {
-                const mask = BigInt(0xFFFFFFFF);
-                this.mt[0] = BigInt(s) & mask;
-                for (let i = 1; i < this.n; i++) {
-                    const prev = this.mt[i - 1];
-                    const v = prev ^ (prev >> BigInt(30));
-                    this.mt[i] = (BigInt(1812433253) * v + BigInt(i)) & mask;
-                }
-                this.mti = this.n;
-            }
-            initByArray(initKey) {
-                const mask = BigInt(0xFFFFFFFF);
-                this.initGenrand(BigInt(19650218));
-                let i = 1, j = 0;
-                const keyLength = initKey.length;
-                for (let k = Math.max(this.n, keyLength); k > 0; k--) {
-                    const v = this.mt[i - 1] ^ (this.mt[i - 1] >> BigInt(30));
-                    this.mt[i] = ((this.mt[i] ^ (v * BigInt(1664525))) + initKey[j] + BigInt(j)) & mask;
-                    i++; j++;
-                    if (i >= this.n) { this.mt[0] = this.mt[this.n - 1]; i = 1; }
-                    if (j >= keyLength) j = 0;
-                }
-                for (let k = this.n - 1; k > 0; k--) {
-                    const v = this.mt[i - 1] ^ (this.mt[i - 1] >> BigInt(30));
-                    this.mt[i] = ((this.mt[i] ^ (v * BigInt(1566083941))) - BigInt(i)) & mask;
-                    i++;
-                    if (i >= this.n) { this.mt[0] = this.mt[this.n - 1]; i = 1; }
-                }
-                this.mt[0] = BigInt(0x80000000);
-                this.mti = this.n;
-            }
-            nextU32() {
-                const mask = BigInt(0xFFFFFFFF);
-                if (this.mti >= this.n) {
-                    for (let kk = 0; kk < this.n - this.m; kk++) {
-                        const y = (this.mt[kk] & this.upperMask) | (this.mt[kk + 1] & this.lowerMask);
-                        const twist = (y % BigInt(2) !== BigInt(0)) ? this.matrixA : BigInt(0);
-                        this.mt[kk] = (this.mt[kk + this.m] ^ (y >> BigInt(1)) ^ twist) & mask;
-                    }
-                    for (let kk = this.n - this.m; kk < this.n - 1; kk++) {
-                        const y = (this.mt[kk] & this.upperMask) | (this.mt[kk + 1] & this.lowerMask);
-                        const twist = (y % BigInt(2) !== BigInt(0)) ? this.matrixA : BigInt(0);
-                        this.mt[kk] = (this.mt[kk + (this.m - this.n)] ^ (y >> BigInt(1)) ^ twist) & mask;
-                    }
-                    const yLast = (this.mt[this.n - 1] & this.upperMask) | (this.mt[0] & this.lowerMask);
-                    const twistLast = (yLast % BigInt(2) !== BigInt(0)) ? this.matrixA : BigInt(0);
-                    this.mt[this.n - 1] = (this.mt[this.m - 1] ^ (yLast >> BigInt(1)) ^ twistLast) & mask;
-                    this.mti = 0;
-                }
-                let y = this.mt[this.mti++];
-                y ^= (y >> BigInt(11));
-                y ^= (y << BigInt(7)) & BigInt(0x9d2c5680);
-                y ^= (y << BigInt(15)) & BigInt(0xefc60000);
-                y ^= (y >> BigInt(18));
-                return y & mask;
-            }
-            getRandBits(k) {
-                if (k <= 0) return BigInt(0);
-                const words = Math.floor((k + 31) / 32);
-                let x = BigInt(0);
-                const base = BigInt(4294967296);
-                for (let i = 0; i < words; i++) x = x * base + this.nextU32();
-                const extra = words * 32 - k;
-                if (extra) x /= bigIntPow(2, extra);
-                return x;
-            }
-            randint(a, b) {
-                return BigInt(a) + this.randBelow(BigInt(b) - BigInt(a) + BigInt(1));
-            }
-            randBelow(n) {
-                const k = BigInt(n).toString(2).length;
-                while (true) {
-                    const r = this.getRandBits(k);
-                    if (r < BigInt(n)) return r;
-                }
-            }
-            shuffle(arr) {
-                for (let i = arr.length - 1; i > 0; i--) {
-                    const j = Number(this.randBelow(i + 1));
-                    [arr[i], arr[j]] = [arr[j], arr[i]];
-                }
-                return arr;
-            }
-        }
-
-        // --- PYTHON-COMPATIBLE BYTE SHIFTING ---
-        function toBytesPython(t) {
-            let bytes = [1]; // Sentinel 0x01
-            if (typeof t === 'string') {
-                for (let i = 0; i < t.length; i++) {
-                    let code = t.charCodeAt(i);
-                    bytes.push(code & 0xFF);
-                    bytes.push((code >> 8) & 0xFF);
-                }
-            } else {
-                // Assuming t is Uint8Array
-                for (let i = 0; i < t.length; i++) bytes.push(t[i]);
-            }
-            let res = 0n;
-            for (let i = 0; i < bytes.length; i++) {
-                res = (res << 8n) | BigInt(bytes[i]);
-            }
-            return res;
-        }
-
-        function fromBytesPython(n) {
-            let hex = n.toString(16);
-            if (hex.length % 2 !== 0) hex = '0' + hex;
-            let bytes = new Uint8Array(hex.length / 2);
-            for (let i = 0; i < hex.length; i += 2) {
-                bytes[i/2] = parseInt(hex.slice(i, i+2), 16);
-            }
-            if (bytes[0] !== 1) throw new Error("Decryption failed: corrupted data or invalid key.");
-            return bytes.slice(1);
-        }
-
-        // --- SHEP32 CORE TRANSLATIONS ---
-        function fastAnyBaseList(val, b) {
-            let v = BigInt(val);
-            const bN = BigInt(b);
-            if (v === BigInt(0)) return ["0"];
-            const powers = [[1, bN]];
-            while (powers[powers.length - 1][1] <= v) {
-                const last = powers[powers.length - 1];
-                powers.push([last[0] * 2, last[1] * last[1]]);
-            }
-            let n = 0;
-            let curBn = BigInt(1);
-            for (let i = powers.length - 1; i >= 0; i--) {
-                const [pN, pVal] = powers[i];
-                if (curBn * pVal <= v) { curBn *= pVal; n += pN; }
-            }
-            n += 1;
-            function convert(v, targetLen) {
-                if (targetLen <= 500) {
-                    const out = [];
-                    for (let i = 0; i < targetLen; i++) { out.push(String(v % bN)); v /= bN; }
-                    return out.reverse();
-                }
-                const half = Math.floor(targetLen / 2);
-                const divisor = bigIntPow(bN, half);
-                return convert(v / divisor, targetLen - half).concat(convert(v % divisor, half));
-            }
-            const res = convert(v, n);
-            while (res.length > 1 && res[0] === "0") res.shift();
-            return res;
-        }
-
-        function fromAnyBase(n, b) {
-            const bN = BigInt(b);
-            const parts = Array.isArray(n) ? n : splitWs(n);
-            if (!parts.length) return BigInt(0);
-            const ints = parts.map(p => BigInt(p));
-            function evalRange(start, end) {
-                if (end - start <= 200) {
-                    let res = BigInt(0);
-                    for (let i = start; i < end; i++) res = res * bN + ints[i];
-                    return res;
-                }
-                const mid = Math.floor((start + end) / 2);
-                return evalRange(start, mid) * bigIntPow(bN, end - mid) + evalRange(mid, end);
-            }
-            return evalRange(0, ints.length);
-        }
-
-        function fastBaseConvert(val, b, padTo, charset) {
-            const bN = BigInt(b);
-            if (padTo <= 500) {
-                const out = [];
-                let v = BigInt(val);
-                for (let i = 0; i < padTo; i++) { out.push(charset[Number(v % bN)]); v /= bN; }
-                return out.reverse().join("");
-            }
-            const half = Math.floor(padTo / 2);
-            const divisor = bigIntPow(bN, half);
-            return fastBaseConvert(val / divisor, b, padTo - half, charset) + fastBaseConvert(val % divisor, b, half, charset);
-        }
-
-        function fDecimal(d, b) {
-            const dN = BigInt(d);
-            const bN = BigInt(b);
-            const c = gChar(b);
-            if (b === 1) return c[0].repeat(Number(dN + BigInt(1)));
-            const target = dN * (bN - BigInt(1)) + bN;
-            const powers = [[1, bN]];
-            while (powers[powers.length - 1][1] <= target) {
-                const last = powers[powers.length - 1];
-                powers.push([last[0] * 2, last[1] * last[1]]);
-            }
-            let n = 0;
-            let curBn = BigInt(1);
-            for (let i = powers.length - 1; i >= 0; i--) {
-                const [pN, pVal] = powers[i];
-                if (curBn * pVal <= target) { curBn *= pVal; n += pN; }
-            }
-            const geomSum = n > 0 ? (bigIntPow(bN, n) - bN) / (bN - BigInt(1)) : BigInt(0);
-            const r = dN - geomSum;
-            return n === 0 ? "" : fastBaseConvert(r, b, n, c);
-        }
-
-        function tDecimal(c, b) {
-            const s = String(c), l = s.length, bN = BigInt(b);
-            if (b === 10) return parseDec(s) + (l > 1 ? (bigIntPow(10, l) - BigInt(10)) / BigInt(9) : BigInt(0));
-            if (b === 16) return parseHex(s) + (l > 1 ? (bigIntPow(16, l) - BigInt(16)) / BigInt(15) : BigInt(0));
-            if (!tDecCache.has(b)) tDecCache.set(b, Object.fromEntries(gChar(b).split('').map((ch, i) => [ch, BigInt(i)])));
-            const charMap = tDecCache.get(b);
-            function evalRange(start, end) {
-                if (end - start <= 200) {
-                    let res = BigInt(0);
-                    for (let i = start; i < end; i++) res = res * bN + charMap[s[i]];
-                    return res;
-                }
-                const mid = Math.floor((start + end) / 2);
-                return evalRange(start, mid) * bigIntPow(bN, end - mid) + evalRange(mid, end);
-            }
-            const v = evalRange(0, l);
-            const geomSum = (b > 1 && l > 1) ? (bigIntPow(bN, l) - bN) / (bN - BigInt(1)) : (l > 1 && b === 1 ? BigInt(l - 1) : BigInt(0));
-            return v + geomSum;
-        }
-
-        function generateSeries(s, n) {
-            const r = new DeterministicRng32(BigInt(s));
-            let out = "";
-            for (let i = 0; i < n; i++) out += String(r.randint(0, 8));
-            return out;
-        }
-
-        function manipulateData(s, c) {
-            const sStr = String(s);
-            const k = generateSeries(c, sStr.length);
-            let out = "";
-            for (let i = 0; i < sStr.length; i++) {
-                const val = (sStr.charCodeAt(i) + k.charCodeAt(i) - 96) % 10;
-                out += String.fromCharCode(val + 48);
-            }
-            return out;
-        }
-
-        function inverseData(s, c) {
-            const sStr = String(s);
-            const k = generateSeries(c, sStr.length);
-            let out = "";
-            for (let i = 0; i < sStr.length; i++) {
-                let val = (sStr.charCodeAt(i) - k.charCodeAt(i)) % 10;
-                if (val < 0) val += 10;
-                out += String.fromCharCode(val + 48);
-            }
-            return out;
-        }
-
-        function qRotate(s) { return s.slice(5) + s.slice(2, 5).split("").reverse().join("") + s.slice(0, 2); }
-        function pRotate(s) { return s.slice(-2) + s.slice(-5, -2).split("").reverse().join("") + s.slice(0, -5); }
-
-        function interject(s) {
-            const str = String(s);
-            const p = str.length % 2 !== 0 ? str[str.length - 1] : "";
-            const sCore = str.length % 2 !== 0 ? str.slice(0, -1) : str;
-            const h = Math.floor(sCore.length / 2);
-            let out = "";
-            for (let i = 0; i < h; i++) out += sCore[i] + sCore[i + h];
-            return out + p;
-        }
-
-        function inverJect(s) {
-            const str = String(s);
-            const p = str.length % 2 !== 0 ? str[str.length - 1] : "";
-            const sCore = str.length % 2 !== 0 ? str.slice(0, -1) : str;
-            let evens = "", odds = "";
-            for (let i = 0; i < sCore.length; i++) {
-                if (i % 2 === 0) evens += sCore[i];
-                else odds += sCore[i];
-            }
-            return evens + odds + p;
-        }
-
-        function bSplit(s, f = 4) {
-            const bStr = binTail(s), l = bStr.length, rem = l % f;
-            const parts = ["1"];
-            for (let i = 0; i < l - rem; i += f) parts.push(bStr.slice(i, i + f).split("").reverse().join(""));
-            if (rem) parts.push(bStr.slice(l - rem));
-            return parseBase2(parts.join(""));
-        }
-
-        function kSplit(s, k) {
-            const sBin = binTail(s), kStr = String(k).replace(/0/g, "");
-            if (!kStr) return parseBase2("1" + sBin.split("").reverse().join(""));
-            const kDigits = kStr.split("").map(d => parseInt(d) + 1);
-            const kLen = kDigits.length, sLen = sBin.length;
-            let chunks = [], idx = 0, kIdx = 0;
-            while (idx < sLen) {
-                const step = kDigits[kIdx % kLen];
-                chunks.push(sBin.slice(idx, idx + step).split("").reverse().join(""));
-                idx += step; kIdx++;
-            }
-            return parseBase2("1" + chunks.join(""));
-        }
-
-        function keySplit(n, k, y = 1) {
-            let m = y === 1 ? String(k) : String(k).split('').reverse().join('');
-            let res = BigInt(n);
-            for (let i = 0; i < m.length; i++) {
-                res = bSplit(res, parseInt(m[i]) + 2);
-            }
-            return res;
-        }
-
-        function baseSplit(n, k, b = 8, y = 1) {
-            const bN = BigInt(b), m = 65536;
-            let nDigits = fastAnyBaseList(n, b);
-            let z = fastAnyBaseList(k, m).filter(x => x.length >= 2 && x.length <= 10);
-            if (!z.length) z = [String(Number(BigInt(k) % BigInt(m - 2)) + 2)];
-            const targetLen = (y === 1) ? nDigits.length + 1 : nDigits.length;
-            let loops = 0;
-            while (z.length < targetLen) {
-                const nextK = BigInt(z[z.length - 1]) + BigInt(m);
-                z.push(...fastAnyBaseList(nextK, m).filter(x => x.length >= 2 && x.length <= 10));
-                if (++loops > 1000) break;
-            }
-            if (z.length < targetLen) z.push(...new Array(targetLen - z.length).fill(z[z.length - 1]));
-            if (y === 1) {
-                const guard = pyMod(BigInt(1) - (BigInt(z[0]) % bN), bN);
-                nDigits = [String(guard)].concat(nDigits);
-                return fromAnyBase(nDigits.map((x, i) => String(pyMod(BigInt(x) + BigInt(z[i]), bN))), b);
-            }
-            const outDigits = nDigits.map((x, i) => String(pyMod(BigInt(x) - BigInt(z[i]), bN)));
-            return outDigits.length <= 1 ? BigInt(0) : fromAnyBase(outDigits.slice(1), b);
-        }
-
-        function Ap(n, m, p) { return (BigInt(n) * BigInt(m)).toString().slice(0, p); }
-        function Bp(n, p) {
-            const n0 = n.charCodeAt(0) - 48;
-            let out = "";
-            for (let i = 0; i < p; i++) out += String((n.charCodeAt(i % n.length) - 48 + n0) % 10);
-            return out;
-        }
-        function Cp(n, m, p) { return (BigInt(n) * BigInt(n.slice(0, 3 % n.length))).toString().slice(0, p); }
-        function Dp(n, m, p) {
-            let out = "";
-            for (let i = 0; i < p; i++) out += Math.abs((n.charCodeAt(i % n.length) - 48) * (m.charCodeAt(i % m.length) - 48));
-            return out.slice(0, p);
-        }
-
-        function Ep(n, p) {
-            let total = BigInt(0);
-            const ln = n.length;
-            for (let i = 0; i < p; i++) {
-                const a = (n.charCodeAt(i % ln) - 48) + 1;
-                const b = (n.charCodeAt((i + 1) % ln) - 48) + 1;
-                const v = PI * (1 / a / b);
-                const frac = v - Math.floor(v);
-                let sFrac = String(frac);
-                if (sFrac === "0") sFrac = "0.0";
-                else if (!sFrac.includes('.')) sFrac = sFrac + ".0";
-                const token = sFrac.slice(2);
-                total += token ? BigInt(token) : BigInt(0);
-            }
-            return total.toString().slice(-p);
-        }
-
-        function processKey(n, m = 0) {
-            let ns = String(n), ms = m ? String(m) : String(n);
-            const p = ns.length, r = parseInt(ns[0]);
-            const tIdx = (ms.length > r) ? parseInt(ms[r]) % p : p - 1;
-            const t = parseInt(ns[tIdx]);
-            const a = (r + t) % 6, b = pyMod(r - t, 6);
-            let res = (a === 0) ? Ap(ns, ms, p) : (a === 1) ? Bp(ns, p) : (a === 2) ? Cp(ns, ms, p) : (a === 3) ? Dp(ns, ms, p) : (a === 4) ? Ep(ns, p) : Ap(Bp(Cp(Dp(Ep(ns, p), ms, p), ms, p), p), ms, p);
-            res = (Number(b) === 0) ? Cp(res, ms, p) : (Number(b) === 1) ? Dp(res, ms, p) : (Number(b) === 2) ? Ap(Bp(Cp(Dp(Ep(res, p), ms, p), ms, p), p), ms, p) : (Number(b) === 3) ? Bp(res, p) : (Number(b) === 4) ? Ap(res, ms, p) : Ap(Bp(Cp(Dp(Ep(res, p), ms, p), ms, p), p), ms, p);
-            const a2 = res.split("").find(x => x !== "0" && !isNaN(x)) || "2";
-            const b2 = res.slice(1).split("").find(x => x !== "0" && !isNaN(x)) || "3";
-            let folded = String(bSplit(bSplit(BigInt(res) + BigInt(pRotate(res)))));
-            let finalNum = tDecimal(qRotate(folded), 10) + BigInt(a2 + b2 + "0".repeat(p - 2));
-            return (finalNum + BigInt(ms)).toString().slice(-p);
-        }
-
-        function checkData(n, i) {
-            let nv = BigInt(n), iv = BigInt(i);
-            while (nv < ten79) { nv *= BigInt(3); nv += iv; iv += iv; }
-            const s = nv.toString();
-            let acc = BigInt(0);
-            for (let j = 0; j < s.length; j += 80) acc += parseDec(s.slice(j, j + 80));
-            return kSplit(BigInt(qRotate(String(bSplit(acc))) + processKey(acc)), acc);
-        }
-
-        function getKey(n, x = 78) {
-            let nv = BigInt(n);
-            while (true) {
-                nv = (nv / BigInt(8)) + BigInt(Ep((nv / BigInt(5)).toString(), nv.toString().length));
-                if (nv.toString().length <= x) return nv.toString();
-            }
-        }
-
-        function fold64(h) {
-            let s = String(h).toLowerCase().replace(/[^0-9a-f]/g, "");
-            if (!s) return "0".repeat(64);
-            if (s.length < 64) {
-                return s.repeat(Math.floor(64 / s.length) + 1);
-            }
-            const out = new Array(64).fill(0);
-            for (let i = 0; i < s.length; i++) out[i % 64] ^= parseInt(s[i], 16);
-            return out.map((x) => digits16[x]).join("");
-        }
-
-        function getE(hex64) {
-            const x = hex64.toLowerCase().padStart(64, '0').slice(-64);
-            const s4 = (parseHex(x.slice(0, 4)) + parseHex(x.slice(-4))).toString().replace(/^0+/, "") || "0";
-            const s4f = s4.slice(0, 4);
-            const n = Number(parseDec(s4f));
-            if (n < 4096) return n;
-            if (n % 2 === 0) return Number(parseDec(s4f.slice(0, -1) || "0")) + (s4f.length > 1 && s4f[s4f.length - 2] === '0' ? 100 : 0);
-            return Number(parseDec(s4f.slice(1) || "0")) + (s4f.length > 1 && s4f[1] === '0' ? 100 : 0);
-        }
-
-        function hashKey(nBytes) {
-            const cd = checkData(nBytes + 90n, (nBytes % 7n) + 1n);
-            const gk = getKey(BigInt(cd), 79);
-            const md = manipulateData(gk, nBytes);
-            const tk = tDecimal(md, 10);
-            const manipulated = fDecimal(tDecimal(hexLower(tk), 16) + parseHex(fDecimal(tk, 16)), 16).slice(-63, -1);
-            const h = fold64(manipulated);
-            const f = parseHex(h.slice(0, 4)), l = parseHex(h.slice(-4));
-            const seedVal = Number((((f >> 8n) ^ (l & 255n) ^ (f & 255n) ^ (l >> 8n)) & 255n));
-            let mh = "";
-            for (let i = 0; i < 64; i += 2) {
-                const byte = pyMod(parseHex(h.slice(i, i + 2)) - BigInt(seedVal), 256);
-                mh += digits16[Number(byte / 16n)] + digits16[Number(byte % 16n)];
-            }
-            const mhVal = hexLower(parseHex(mh) + parseHex(h));
-            const baseParam = parseHex(mhVal.slice(0, 4).padStart(4, "0"));
-            const splitVal = baseSplit(parseHex(mhVal), parseHex(mhVal.slice(-4).padStart(4, "0")), Number((baseParam & 4096n) + 64n), 1);
-            const sFull = hexLower(parseHex(h) + parseHex(hexLower(splitVal)));
-            const finalH = fold64(sFull);
-            return [finalH, getE(finalH)];
-        }
-
-        function generatePKey(n = "") {
-            if (typeof n === 'string' && n.trim() !== "") {
-                return hashKey(toBytesPython(n))[0].toLowerCase();
-            }
-            const chars = gChar(62);
-            const seedVal = BigInt(Math.floor(Math.random() * 0xFFFFFFFF)) ^ BigInt(Date.now());
-            const r = new DeterministicRng32(seedVal);
-            const ln = Number(r.randint(64, 256));
-            let sArr = [];
-            for (let i = 0; i < ln; i++) sArr.push(chars[Number(r.randBelow(62))]);
-            r.shuffle(sArr);
-            const base62 = sArr.join("");
-            return hashKey(tDecimal(base62, 62))[0].toLowerCase();
-        }
-
-        function pData(n, keys, b) {
-            let res = BigInt(n);
-            const bN = BigInt(b);
-            for (let i = 0; i < keys.length; i++) {
-                let key = keys[i];
-                res = keySplit(res, key, 1);
-                res = tDecimal(manipulateData(res.toString(), key), 10);
-                res = baseSplit(res, key, Number(bN), 1);
-                res = kSplit(res, key.toString());
-                if (parseInt(key.toString()[0]) % 2 === 1) {
-                    res = BigInt(interject(res.toString()));
-                }
-            }
-            return res;
-        }
-
-        function dData(n, keys, b) {
-            let res = BigInt(n);
-            const bN = BigInt(b);
-            for (let i = keys.length - 1; i >= 0; i--) {
-                let key = keys[i];
-                if (parseInt(key.toString()[0]) % 2 === 1) {
-                    res = BigInt(inverJect(res.toString()));
-                }
-                res = kSplit(res, key.toString());
-                let bs = baseSplit(res, key, Number(bN), 0);
-                let fDecStr = fDecimal(bs, 10);
-                let invStr = inverseData(fDecStr, key);
-                res = keySplit(BigInt(invStr), key, 0);
-            }
-            return res;
-        }
-
-        function encryptData(nRaw, k = "") {
-            let n = toBytesPython(nRaw);
-            let hKey, e;
-            if (k) {
-                hKey = k.toLowerCase();
-                e = getE(hKey);
-            } else {
-                const hkTuple = hashKey(n);
-                hKey = hkTuple[0];
-                e = hkTuple[1];
-            }
-            let key0 = tDecimal(hKey, 16);
-            let b = e;
-
-            let keys = [key0];
-            let key = key0;
-            for (let i = 0; i < 9; i++) {
-                key = BigInt(processKey(key));
-                keys.push(key);
-            }
-
-            n = n + (key / BigInt(b));
-            n = pData(n, keys, b);
-            return { c: fDecimal(n, 62), k: hKey };
-        }
-
-        function decryptData(cStr, k) {
-            let hKey = k.toLowerCase();
-            let e = getE(hKey);
-            let key0 = tDecimal(hKey, 16);
-            let b = e;
-            let n = tDecimal(cStr, 62);
-
-            let keys = [key0];
-            let key = key0;
-            for (let i = 0; i < 9; i++) {
-                key = BigInt(processKey(key));
-                keys.push(key);
-            }
-
-            n = dData(n, keys, b);
-            n = n - (key / BigInt(b));
-            return fromBytesPython(n);
-        }
+        // --- ICONS ---
+        const I = {
+            shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+            copy: '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>',
+            check: '<polyline points="20 6 9 17 4 12"></polyline>',
+            lock: '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path>',
+            unlock: '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path>',
+            key: '<path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path>',
+            dl: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>',
+            up: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>',
+            info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+            eye: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>',
+            eyeoff: '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>',
+            x: '<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>',
+            file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline>',
+            refresh: '<polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>',
+            github: '<path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>',
+            code: '<polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline>',
+            terminal: '<polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line>',
+            play: '<polygon points="5 3 19 12 5 21 5 3"></polygon>',
+            bar: '<path d="M3 3v18h18"/><rect width="4" height="7" x="7" y="10" rx="1"/><rect width="4" height="12" x="15" y="5" rx="1"/>'
+        };
+        const Icon = ({n, className, ...p}) => <svg {...p} className={className || "w-4 h-4"} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" dangerouslySetInnerHTML={{__html: I[n]}}/>;
 
         // --- UTILS ---
-        const DOC_EXTS = ['.pdf', '.doc', '.docx', '.txt', '.rtf', '.odt', '.md', '.csv', '.xls', '.xlsx'];
-        const MAX_FILE_SIZE = 101 * 1024; // 101KB hard cap
-        const KEY_HEADER = "-----BEGIN SHEP32 KEY-----\n";
-        const KEY_FOOTER = "\n-----END SHEP32 KEY-----";
-        const META_HEADER = "SHEP32FILEv1\n";
-        const META_DELIM = "\n---\n";
+        const DOC_EXTS = ['.txt', '.csv', '.md', '.json', '.xml', '.log', '.html', '.js', '.ts', '.jsx', '.tsx'];
 
         function downloadBlob(data, filename, type = 'application/octet-stream') {
             const blob = new Blob([data], { type });
@@ -724,10 +86,135 @@
             URL.revokeObjectURL(url);
         }
 
+        function formatNum(num, digits=2) {
+            if(num === undefined || num === null || isNaN(num)) return "—";
+            return Number(num).toFixed(digits);
+        }
+
+        function downloadTextFile(content, filename) {
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // --- BENCHMARK MATH UTILS ---
+        const _L1MAX = 1.875;
+        function initMatrix() { return { N: 0, pos: Array.from({length: 64}, () => new Array(16).fill(0)), gc: new Array(16).fill(0) }; }
+        function pushHex(mx, hx) {
+            mx.N++;
+            for (let i = 0; i < 64; i++) {
+                const v = parseInt(hx[i], 16);
+                if(!isNaN(v)) { mx.pos[i][v]++; mx.gc[v]++; }
+            }
+        }
+        function posUniform(mx) {
+            if (mx.N <= 0) return 0.0;
+            const u = 1.0 / 16.0; let tot = 0.0;
+            for (let p = 0; p < 64; p++) {
+                let l1 = 0.0;
+                for (let c of mx.pos[p]) l1 += Math.abs((c / mx.N) - u);
+                tot += (1.0 - (l1 / _L1MAX));
+            }
+            return Math.max(0.0, Math.min(1.0, tot / 64.0));
+        }
+        function globalUniform(mx) {
+            if (mx.N <= 0) return 0.0;
+            const total = 64.0 * mx.N, u = 1.0 / 16.0; let l1 = 0.0;
+            for (let c of mx.gc) l1 += Math.abs((c / total) - u);
+            return Math.max(0.0, Math.min(1.0, 1.0 - (l1 / _L1MAX)));
+        }
+        function hexToBits(h) {
+            const bits = [];
+            for (let ch of (h||"").toLowerCase()) {
+                const v = parseInt(ch, 16);
+                if (!isNaN(v)) bits.push((v >> 3) & 1, (v >> 2) & 1, (v >> 1) & 1, v & 1);
+            }
+            return bits;
+        }
+        function shannonEntropyBit(p1) {
+            if (p1 <= 0.0 || p1 >= 1.0) return 0.0;
+            const p0 = 1.0 - p1; return -(p0 * Math.log2(p0) + p1 * Math.log2(p1));
+        }
+        function erfc(x) {
+            const t = 1.0 / (1.0 + 0.5 * Math.abs(x));
+            const ans = t * Math.exp(-x * x - 1.26551223 + t * (1.00002368 + t * (0.37409196 + t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))));
+            return x >= 0 ? ans : 2.0 - ans;
+        }
+        function runsTestP(bits) {
+            const n = bits.length; if (n < 2) return 0.0;
+            const ones = bits.reduce((a, b) => a + b, 0), pi = ones / n;
+            if (Math.abs(pi - 0.5) >= 2.0 / Math.sqrt(n)) return 0.0;
+            let v = 1; for (let i = 1; i < n; i++) if (bits[i] !== bits[i - 1]) v++;
+            const num = Math.abs(v - (2.0 * n * pi * (1.0 - pi))), den = 2.0 * Math.sqrt(2.0 * n) * pi * (1.0 - pi);
+            return den === 0 ? 0.0 : erfc(num / den);
+        }
+        function hamming(aBits, bBits) {
+            let count = 0, len = Math.min(aBits.length, bBits.length);
+            for (let i = 0; i < len; i++) if (aBits[i] !== bBits[i]) count++;
+            return count;
+        }
+        function keyStats(hexList) {
+            if (!hexList || !hexList.length) return [0, 0.0, 0.0, 0.0, 0.0];
+            const perBits = hexList.map(hexToBits).filter(b => b.length > 0);
+            if (!perBits.length) return [0, 0.0, 0.0, 0.0, 0.0];
+            const bitLen = perBits[0].length, allBits = [];
+            for (const b of perBits) allBits.push(...b);
+            const n = allBits.length, ones = allBits.reduce((a, b) => a + b, 0);
+            const onesPct = n ? (ones * 100.0 / n) : 0.0, ent = shannonEntropyBit(n ? (ones / n) : 0.0), runsP = runsTestP(allBits);
+            let avgHam = 0.0;
+            if (perBits.length >= 2) {
+                let hs = 0, c = 0;
+                for (let i = 1; i < perBits.length; i++) { hs += hamming(perBits[i - 1], perBits[i]); c++; }
+                avgHam = c ? (hs / c) : 0.0;
+            }
+            return [bitLen, onesPct, ent, runsP, avgHam];
+        }
+        function bitAbsScore(bitLen, onesPct, ent, runsP, avgHam) {
+            if (bitLen <= 0) return 0.0;
+            const biasN = Math.pow((onesPct - 50.0) / 50.0, 2), entN = Math.pow((1.0 - Math.max(0.0, Math.min(1.0, ent))), 2), hamFrac = (avgHam / bitLen) || 0.0, hamN = Math.pow((hamFrac - 0.5) / 0.5, 2), rp = Math.max(0.0, Math.min(1.0, runsP)), runN = Math.pow((rp - 0.5) / 0.5, 2);
+            return 100.0 * Math.max(0.0, Math.min(1.0, 1.0 - ((0.18 * biasN) + (0.18 * entN) + (0.44 * hamN) + (0.20 * runN))));
+        }
+        function matrixAbsScore(posU, globU) { return 100.0 * (0.85 * posU + 0.15 * globU); }
+        function clamp(x, lo, hi) { return x < lo ? lo : (x > hi ? hi : x); }
+        function fairPairScores(absA, absB) {
+            const base = 0.5 * ((90.0 + 9.0 * (absA / 100.0)) + (90.0 + 9.0 * (absB / 100.0)));
+            const delta = 2.25 * Math.tanh((absA - absB) / 10.0);
+            return [clamp(base + delta, 90.0, 99.5), clamp(base - delta, 90.0, 99.5)];
+        }
+
+        async function sha256Hash(message) {
+            const msgUint8 = new TextEncoder().encode(message);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        // --- API PARSING LOGIC ---
+        function getArgs(func) {
+            const str = func.toString().replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '').replace(/\n/g, ' ');
+            let match = str.match(/^(?:async\s+)?function(?:\s+\w+)?\s*\(([^)]*)\)/);
+            if (match) return parseArgString(match[1]);
+            match = str.match(/^(?:async\s+)?(?:\*?\s*)?[a-zA-Z_$][0-9a-zA-Z_$]*\s*\(([^)]*)\)\s*\{/);
+            if (match) return parseArgString(match[1]);
+            match = str.match(/^(?:async\s+)?\(([^)]*)\)\s*=>/);
+            if (match) return parseArgString(match[1]);
+            match = str.match(/^(?:async\s+)?([a-zA-Z_$][0-9a-zA-Z_$]*)\s*=>/);
+            if (match) return [match[1]];
+            return [];
+        }
+
+        function parseArgString(str) {
+            return str.split(',').map(s => s.trim().split('=')[0].trim()).map(s => s.split(':')[0].trim()).map(s => s.replace(/^[.{3}]+/, '')).filter(s => s && !s.startsWith('//') && !s.startsWith('/*'));
+        }
+
         // --- UI COMPONENTS ---
         const InfoTooltip = ({ text }) => (
             <div className="group relative inline-flex items-center ml-2 align-middle">
-                <Info className="w-3.5 h-3.5 text-zinc-500 cursor-help hover:text-cyan-400 transition-colors" />
+                <Icon n="info" className="w-3.5 h-3.5 text-zinc-500 cursor-help hover:text-cyan-400 transition-colors" />
                 <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover:block w-56 p-2 bg-zinc-800 text-zinc-200 text-[10px] rounded-md shadow-xl border border-zinc-700 z-50 text-center pointer-events-none font-mono">
                     {text}
                     <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-zinc-800"></div>
@@ -758,9 +245,7 @@
             const handleDrop = (e) => {
                 e.preventDefault(); setIsDragging(false);
                 if (disabled) return;
-                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                    onFile(e.dataTransfer.files[0]);
-                }
+                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) onFile(e.dataTransfer.files[0]);
             };
             
             return (
@@ -769,18 +254,18 @@
                     onDragLeave={() => setIsDragging(false)}
                     onDrop={handleDrop}
                     onClick={() => !disabled && inputRef.current.click()}
-                    className={`border-2 border-dashed rounded-xl p-6 text-center transition-all ${disabled ? 'opacity-50 cursor-not-allowed border-zinc-800 bg-zinc-950/50' : isDragging ? 'border-cyan-500 bg-cyan-500/10 cursor-copy' : 'border-zinc-800 hover:border-zinc-600 bg-zinc-900/30 hover:bg-zinc-900/50 cursor-pointer'}`}
+                    className={`border-2 border-dashed rounded-xl p-6 text-center transition-all h-full flex flex-col justify-center min-h-[140px] ${disabled ? 'opacity-50 cursor-not-allowed border-zinc-800 bg-zinc-950/50' : isDragging ? 'border-cyan-500 bg-cyan-500/10 cursor-copy' : 'border-zinc-800 hover:border-zinc-600 bg-zinc-900/30 hover:bg-zinc-900/50 cursor-pointer'}`}
                 >
                     <input type="file" ref={inputRef} onChange={(e) => e.target.files[0] && onFile(e.target.files[0])} accept={accept} className="hidden" disabled={disabled} />
                     {file ? (
                         <div className="flex flex-col items-center text-cyan-400">
-                            <FileText className="w-8 h-8 mb-2" />
-                            <span className="text-xs font-bold break-all">{file.name}</span>
-                            <span className="text-[10px] text-zinc-500 mt-1">{(file.size / 1024).toFixed(2)} KB</span>
+                            <Icon n="file" className="w-8 h-8 mb-2" />
+                            <span className="text-xs font-bold break-all px-2">{file.name}</span>
+                            <span className="text-[10px] text-zinc-500 mt-1 font-mono">{(file.size / 1024).toFixed(2)} KB</span>
                         </div>
                     ) : (
                         <div className="flex flex-col items-center text-zinc-500">
-                            <Upload className="w-8 h-8 mb-2" />
+                            <Icon n="up" className="w-8 h-8 mb-2" />
                             <span className="text-xs font-bold uppercase tracking-widest">{label}</span>
                             <span className="text-[10px] mt-1">Drag & drop or click to browse</span>
                         </div>
@@ -789,26 +274,25 @@
             );
         };
 
-        const ProgressModal = ({ isVisible, progress, isEncrypt, sizeBytes }) => {
+        const ProgressModal = ({ isVisible, isEncrypt, done, total }) => {
             if (!isVisible) return null;
-            const targetSeconds = isEncrypt ? Math.floor(sizeBytes * 0.4 / 1024) : Math.floor(sizeBytes * 0.05 / 1024);
-            const targetStr = targetSeconds < 1 ? "< 1s" : `${targetSeconds}s`;
+            const pct = total > 0 ? Math.floor((done / total) * 100) : 0;
             
             return (
                 <div className="fixed inset-0 bg-black/90 z-50 flex flex-col items-center justify-center p-4 backdrop-blur-sm">
                     <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-8 shadow-2xl">
                         <div className="flex justify-between items-end mb-4">
                             <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-2">
-                                <RefreshCw className="w-4 h-4 text-cyan-500 animate-spin" />
-                                {isEncrypt ? 'Encrypting Struct' : 'Decrypting Struct'}
+                                <Icon n="refresh" className="w-4 h-4 text-cyan-500 animate-spin" />
+                                {isEncrypt ? 'Encrypting Payload' : 'Decrypting Payload'}
                             </h3>
-                            <span className="text-cyan-400 font-mono font-bold">{Math.floor(progress * 100)}%</span>
+                            <span className="text-cyan-400 font-mono font-bold">{pct}%</span>
                         </div>
                         <div className="h-2 w-full bg-zinc-950 rounded-full overflow-hidden border border-zinc-800">
-                            <div className="h-full bg-cyan-500 transition-all duration-200 shadow-[0_0_10px_rgba(6,182,212,0.5)]" style={{ width: `${progress * 100}%` }} />
+                            <div className="h-full bg-cyan-500 transition-all duration-200 shadow-[0_0_10px_rgba(6,182,212,0.5)]" style={{ width: `${pct}%` }} />
                         </div>
                         <div className="flex justify-between mt-4 text-[10px] font-mono text-zinc-500 uppercase">
-                            <span>Est: {targetStr}</span>
+                            <span>Step {done} of {total}</span>
                             <span>Processing...</span>
                         </div>
                     </div>
@@ -816,106 +300,397 @@
             );
         };
 
+        const MetricRow = ({ label, shepVal, shaVal, isFinal }) => (
+            <div className={`flex justify-between items-center py-3 border-b border-zinc-800/50 last:border-0 ${isFinal ? 'bg-zinc-900/40 rounded-lg px-2 mt-2 border-none' : ''}`}>
+                <span className={`w-1/3 text-xs md:text-sm font-mono uppercase tracking-tighter ${isFinal ? 'text-cyan-500 font-bold' : 'text-zinc-400'}`}>{label}</span>
+                <span className={`w-1/3 text-center text-sm md:text-base font-bold font-mono ${isFinal ? 'text-white' : 'text-cyan-400'}`}>{shepVal}</span>
+                <span className={`w-1/3 text-right text-sm md:text-base font-bold font-mono ${isFinal ? 'text-white' : 'text-zinc-300'}`}>{shaVal}</span>
+            </div>
+        );
+
+        const CliRunner = ({ shep32Api }) => {
+            const [cmd, setCmd] = useState('--text "hello world"');
+            const [files, setFiles] = useState({});
+            const [result, setResult] = useState(null);
+            const [running, setRunning] = useState(false);
+            const fileInputRef = useRef(null);
+
+            const handleFileUpload = async (e) => {
+                const newFiles = { ...files };
+                for (const file of e.target.files) {
+                    const buf = await file.arrayBuffer();
+                    newFiles[file.name] = new Uint8Array(buf);
+                }
+                setFiles(newFiles);
+                if(fileInputRef.current) fileInputRef.current.value = '';
+            };
+
+            const removeFile = (name) => {
+                const newFiles = { ...files };
+                delete newFiles[name];
+                setFiles(newFiles);
+            };
+
+            const execute = async () => {
+                setRunning(true);
+                setResult(null);
+                try {
+                    const res = await shep32Api.runCli(cmd, { files });
+                    setResult(res);
+                } catch (err) {
+                    setResult({ error: err.toString() });
+                }
+                setRunning(false);
+            };
+
+            return (
+                <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6 shadow-xl w-full">
+                    <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                        <Icon n="terminal" className="text-cyan-500 w-5 h-5"/> CLI Command Runner
+                    </h3>
+                    <div className="mb-6">
+                        <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Command Arguments</label>
+                        <div className="flex flex-col sm:flex-row gap-3">
+                            <input 
+                                type="text" 
+                                className="flex-grow bg-zinc-950 font-mono border border-zinc-800 text-cyan-400 rounded-xl p-3 text-sm focus:ring-1 focus:ring-cyan-500 outline-none"
+                                placeholder="e.g. --encrypt-file sample.txt --key secret"
+                                value={cmd}
+                                onChange={e => setCmd(e.target.value)}
+                                onKeyDown={e => e.key === 'Enter' && execute()}
+                            />
+                            <button 
+                                onClick={execute}
+                                disabled={running}
+                                className="bg-cyan-600 hover:bg-cyan-500 disabled:bg-cyan-900/50 text-white px-8 py-3 rounded-xl font-bold transition-colors whitespace-nowrap text-sm uppercase tracking-widest"
+                            >
+                                {running ? 'Running...' : 'Execute'}
+                            </button>
+                        </div>
+                        <p className="text-[10px] text-zinc-500 mt-2 font-mono">Try: <code className="bg-zinc-800 text-zinc-300 px-1 rounded">--text "abc"</code> or <code className="bg-zinc-800 text-zinc-300 px-1 rounded">--help</code></p>
+                    </div>
+                    
+                    <div className="mb-6 bg-zinc-950/50 p-4 rounded-xl border border-dashed border-zinc-800">
+                        <label className="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1.5">Virtual File System (ctx.files)</label>
+                        <p className="text-[10px] text-zinc-500 mb-3">Upload files here to use them in commands like <code className="bg-zinc-800 px-1 rounded text-zinc-300">--encrypt-file filename.txt</code></p>
+                        <div className="flex items-center gap-4 mb-3">
+                            <input 
+                                type="file" 
+                                multiple 
+                                onChange={handleFileUpload} 
+                                ref={fileInputRef}
+                                className="block w-full text-xs text-zinc-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-cyan-900/30 file:text-cyan-400 hover:file:bg-cyan-900/50 cursor-pointer"
+                            />
+                        </div>
+                        {Object.keys(files).length > 0 && (
+                            <div className="flex flex-wrap gap-2 mt-4">
+                                {Object.entries(files).map(([name, data]) => (
+                                    <div key={name} className="flex items-center gap-2 bg-zinc-900 px-3 py-1.5 rounded-lg border border-zinc-700 text-xs shadow-sm">
+                                        <span className="font-mono text-zinc-300">{name} <span className="text-[10px] text-zinc-500">({data.length} bytes)</span></span>
+                                        <button onClick={() => removeFile(name)} className="text-red-400 hover:text-red-300 font-bold ml-2 text-lg leading-none">&times;</button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {result && (
+                        <div className="mt-6 border-t border-zinc-800 pt-6">
+                            <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-3">Execution Output</h4>
+                            {result.error ? (
+                                <div className="bg-red-950/30 text-red-400 p-4 rounded-xl font-mono text-xs overflow-auto max-h-64 whitespace-pre-wrap border border-red-900/50">
+                                    {result.error}
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    {(result.stdout || result.stderr) ? (
+                                        <div className="bg-zinc-950 text-zinc-300 p-4 rounded-xl font-mono text-xs overflow-auto max-h-96 whitespace-pre-wrap shadow-inner border border-zinc-800 relative custom-scrollbar">
+                                            {result.stdout && <div>{result.stdout}</div>}
+                                            {result.stderr && <div className="text-red-400">{result.stderr}</div>}
+                                            <div className="absolute top-2 right-2 text-zinc-500 text-[10px] font-sans bg-zinc-900 px-2 py-1 rounded border border-zinc-800">Exit: {result.exitCode}</div>
+                                        </div>
+                                    ) : (
+                                        <div className="bg-zinc-950 text-zinc-500 p-4 rounded-xl text-xs font-mono border border-zinc-800">Command executed successfully with no console output.</div>
+                                    )}
+                                    {result.files && Object.keys(result.files).length > 0 && (
+                                        <div className="bg-cyan-950/20 border border-cyan-900/50 p-4 rounded-xl">
+                                            <h5 className="text-xs font-bold text-cyan-500 mb-3 uppercase tracking-widest">Generated / Modified Files</h5>
+                                            <div className="flex flex-col gap-2">
+                                                {Object.entries(result.files).map(([name, data]) => (
+                                                    <div key={name} className="flex items-center justify-between bg-zinc-950 border border-zinc-800 p-3 rounded-lg shadow-sm">
+                                                        <span className="font-mono text-zinc-300 text-xs">{name} <span className="text-[10px] text-zinc-500 ml-1">({data.length} bytes)</span></span>
+                                                        <button 
+                                                            onClick={() => downloadBlob(data, name)}
+                                                            className="bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-1.5 rounded-md text-[10px] font-bold transition-colors uppercase tracking-widest"
+                                                        >
+                                                            Download
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const FunctionCard = ({ funcDef }) => {
+            const [args, setArgs] = useState(funcDef.params.reduce((acc, param) => ({ ...acc, [param]: '' }), {}));
+            const [result, setResult] = useState(null);
+            const [error, setError] = useState(null);
+            const [status, setStatus] = useState('idle');
+
+            const execute = async () => {
+                setResult(null);
+                setError(null);
+                setStatus('idle');
+                try {
+                    const parsedArgs = funcDef.params.map(param => {
+                        const val = args[param];
+                        if (val === '') return undefined;
+                        try { return JSON.parse(val); } catch (e) { return val; }
+                    });
+
+                    let res = funcDef.func.apply(funcDef.context, parsedArgs);
+                    if (res instanceof Promise) res = await res;
+                    
+                    if (typeof res === 'object') {
+                        if (res instanceof Uint8Array) {
+                            setResult(`Uint8Array(${res.length}) [${res.slice(0, 20).join(', ')}${res.length > 20 ? '...' : ''}]`);
+                        } else {
+                            setResult(JSON.stringify(res, null, 2));
+                        }
+                    } else if (res === undefined) {
+                        setResult('undefined');
+                    } else {
+                        setResult(String(res));
+                    }
+                    setStatus('success');
+                } catch (e) {
+                    setError(e.toString());
+                    setStatus('error');
+                }
+            };
+
+            return (
+                <div className="bg-zinc-900/40 p-6 rounded-2xl shadow-sm border border-zinc-800 flex flex-col w-full">
+                    <div className="flex justify-between items-start mb-4">
+                        <h3 className="text-sm font-bold text-white font-mono break-all pr-4">
+                            <span className="text-cyan-400">{funcDef.name}</span>()
+                        </h3>
+                        {status === 'success' && <Icon n="check" className="w-5 h-5 text-green-400 shrink-0" />}
+                        {status === 'error' && <Icon n="x" className="w-5 h-5 text-red-500 shrink-0" />}
+                    </div>
+
+                    <div className="space-y-4 mb-6 flex-grow">
+                        {funcDef.params.map(param => (
+                            <div key={param}>
+                                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">{param}</label>
+                                <input 
+                                    type="text" 
+                                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg focus:ring-1 focus:ring-cyan-500 p-2.5 text-xs text-zinc-300 transition-colors outline-none font-mono"
+                                    placeholder={`Enter ${param}...`}
+                                    value={args[param]}
+                                    onChange={e => setArgs({...args, [param]: e.target.value})}
+                                />
+                            </div>
+                        ))}
+                        {funcDef.params.length === 0 && (
+                            <div className="h-full flex items-center justify-center p-4 bg-zinc-950/50 border border-dashed border-zinc-800 rounded-lg">
+                                <p className="text-xs text-zinc-600 font-mono italic">No arguments required.</p>
+                            </div>
+                        )}
+                    </div>
+
+                    <button 
+                        onClick={execute}
+                        className="flex items-center justify-center w-full bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2.5 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-colors"
+                    >
+                        <Icon n="play" className="w-3.5 h-3.5 mr-2" /> Execute
+                    </button>
+                    
+                    {(result !== null || error !== null) && (
+                        <div className={`mt-4 p-4 rounded-xl border custom-scrollbar overflow-auto max-h-48 ${error ? 'bg-red-950/20 border-red-900/50' : 'bg-zinc-950 border-zinc-800'}`}>
+                            <span className={`text-[10px] font-bold uppercase tracking-widest ${error ? 'text-red-500' : 'text-zinc-500'}`}>
+                                {error ? 'Error Output' : 'Return Value'}
+                            </span>
+                            {error ? (
+                                <pre className="text-red-400 whitespace-pre-wrap text-xs mt-1.5 font-mono">{error}</pre>
+                            ) : (
+                                <pre className="text-zinc-300 whitespace-pre-wrap text-xs mt-1.5 font-mono">{result}</pre>
+                            )}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
         /**
          * MAIN APPLICATION
          */
         const App = () => {
-            const [activeTab, setActiveTab] = useState('encrypt'); // 'encrypt' | 'decrypt' | 'generate'
+            const defaultScriptUrl = 'https://raw.githubusercontent.com/andylehti/SHEP32/refs/heads/main/js/shep32.js';
+            const [coreLoaded, setCoreLoaded] = useState(false);
+            const [coreError, setCoreError] = useState('');
+            const [activeTab, setActiveTab] = useState('about'); 
             const [resetModal, setResetModal] = useState({ open: false, onConfirm: null });
             
             // Progress State
             const [isProcessing, setIsProcessing] = useState(false);
-            const [uiProgress, setUiProgress] = useState(0);
+            const [progressDone, setProgressDone] = useState(0);
+            const [progressTotal, setProgressTotal] = useState(1);
             const [processingType, setProcessingType] = useState('encrypt');
-            const [processingSize, setProcessingSize] = useState(0);
-            const uiProgressRef = useRef(0);
-            const animFrameRef = useRef(null);
+
+            // Global API state
+            const [apiFuncs, setApiFuncs] = useState([]);
+            const [cliViewMode, setCliViewMode] = useState('cli'); 
+
+            // Handle dynamic loader bypass to load SHEP32 from GitHub directly
+            const loadCoreScript = async (url) => {
+                setCoreLoaded(false);
+                setCoreError('');
+                try {
+                    let fetchUrl = url;
+                    if (fetchUrl.includes('github.com') && !fetchUrl.includes('raw.githubusercontent.com')) {
+                        fetchUrl = fetchUrl.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
+                    }
+                    const res = await fetch(fetchUrl);
+                    if (!res.ok) throw new Error(`Failed to fetch script: ${res.statusText}`);
+                    const text = await res.text();
+                    
+                    await new Promise((resolve, reject) => {
+                        try {
+                            const scriptEl = document.createElement('script');
+                            scriptEl.text = text;
+                            document.body.appendChild(scriptEl);
+                            resolve();
+                        } catch(e) {
+                            reject(e);
+                        }
+                    });
+                    
+                    if (!window.SHEP32) throw new Error("SHEP32 object not found.");
+                    
+                    const funcs = [];
+                    for (const [key, value] of Object.entries(window.SHEP32)) {
+                        if (typeof value === 'function') {
+                            funcs.push({ name: key, func: value, params: getArgs(value), context: window.SHEP32 });
+                        }
+                    }
+                    setApiFuncs(funcs);
+                    setCoreLoaded(true);
+                } catch (e) {
+                    setCoreError(e.toString());
+                }
+            };
+
+            useEffect(() => {
+                if (window.SHEP32) {
+                    const funcs = [];
+                    for (const [key, value] of Object.entries(window.SHEP32)) {
+                        if (typeof value === 'function') {
+                            funcs.push({ name: key, func: value, params: getArgs(value), context: window.SHEP32 });
+                        }
+                    }
+                    setApiFuncs(funcs);
+                    setCoreLoaded(true);
+                } else {
+                    loadCoreScript(defaultScriptUrl);
+                }
+            }, []);
 
             // --- TAB: GENERATE KEY ---
             const [genUsePhrase, setGenUsePhrase] = useState(false);
             const [genPhrase, setGenPhrase] = useState('');
             const [genResult, setGenResult] = useState('');
             const [genCopied, setGenCopied] = useState(false);
+            const [genIsExtended, setGenIsExtended] = useState(false);
 
             const handleGenerateKey = () => {
+                const mode = genIsExtended ? 1 : 0;
                 if (genUsePhrase) {
                     if (!genPhrase.trim()) return;
-                    setGenResult(generatePKey(genPhrase));
+                    setGenResult(window.SHEP32.generateKey(genPhrase, mode, 8));
                 } else {
-                    setGenResult(generatePKey());
+                    setGenResult(window.SHEP32.generateKey(undefined, mode, 8));
                 }
-            };
-            
-            const handleDownloadKeyFile = (hexStr, filename) => {
-                const content = `${KEY_HEADER}${hexStr}${KEY_FOOTER}`;
-                downloadBlob(content, filename, 'text/plain');
             };
 
             // --- TAB: ENCRYPT ---
-            const [encInputType, setEncInputType] = useState(null); // 'text' | 'file'
+            const [encInputType, setEncInputType] = useState(null); 
             const [encText, setEncText] = useState('');
             const [encFile, setEncFile] = useState(null);
+            const [encOutputName, setEncOutputName] = useState('');
             
-            const [encKeyMode, setEncKeyMode] = useState('manual'); // 'manual' | 'phrase' | 'file'
+            const [encKeyMode, setEncKeyMode] = useState('manual'); 
             const [encManualKey, setEncManualKey] = useState('');
             const [encPhrase, setEncPhrase] = useState('');
             const [encKeyFile, setEncKeyFile] = useState(null);
             const [encKeyFileHex, setEncKeyFileHex] = useState('');
+            const [encIsExtended, setEncIsExtended] = useState(false);
             
             const [encError, setEncError] = useState('');
-            const [encResult, setEncResult] = useState(null); // { c: string, keyUsed: string, origName: string, isFile: boolean }
+            const [encResult, setEncResult] = useState(null); 
             const [encShowPreview, setEncShowPreview] = useState(false);
 
-            const encDerivedKey = encKeyMode === 'phrase' && encPhrase ? generatePKey(encPhrase) : '';
+            const encDerivedKey = encKeyMode === 'phrase' && encPhrase ? window.SHEP32.generateKey(encPhrase, encIsExtended ? 1 : 0, 8) : '';
             const encActiveKey = encKeyMode === 'file' ? encKeyFileHex : (encKeyMode === 'phrase' ? encDerivedKey : encManualKey);
 
             const handleEncryptKeyFile = async (file) => {
-                const text = await file.text();
-                const match = text.match(/-----BEGIN SHEP32 KEY-----\n([a-f0-9]{64})\n-----END SHEP32 KEY-----/i);
-                if (match) {
+                try {
+                    const text = await file.text();
+                    const keyStr = window.SHEP32.parseKeyFileText(text).trim();
                     setEncKeyFile(file);
-                    setEncKeyFileHex(match[1].toLowerCase());
+                    setEncKeyFileHex(keyStr);
                     setEncKeyMode('file');
                     setEncError('');
-                } else {
+                    if (keyStr.length === 72) setEncIsExtended(true);
+                    else if (keyStr.length === 64) setEncIsExtended(false);
+                } catch(e) {
                     setEncError('Invalid key file format.');
                 }
             };
 
             // --- TAB: DECRYPT ---
-            const [decInputType, setDecInputType] = useState(null); // 'text' | 'file'
+            const [decInputType, setDecInputType] = useState(null); 
             const [decText, setDecText] = useState('');
             const [decFile, setDecFile] = useState(null);
-            const [decFileData, setDecFileData] = useState(''); // String
+            const [decFileData, setDecFileData] = useState(''); 
             
-            const [decKeyMode, setDecKeyMode] = useState('manual'); // 'manual' | 'phrase' | 'file'
+            const [decKeyMode, setDecKeyMode] = useState('manual'); 
             const [decManualKey, setDecManualKey] = useState('');
             const [decPhrase, setDecPhrase] = useState('');
             const [decKeyFile, setDecKeyFile] = useState(null);
             const [decKeyFileHex, setDecKeyFileHex] = useState('');
+            const [decIsExtended, setDecIsExtended] = useState(false);
 
             const [decError, setDecError] = useState('');
-            const [decResult, setDecResult] = useState(null); // { isFile: boolean, name: string, dataBytes: Uint8Array, text: string }
-            const [decOutputChoice, setDecOutputChoice] = useState('browser'); // 'browser' | 'file'
+            const [decResult, setDecResult] = useState(null); 
+            const [decOutputChoice, setDecOutputChoice] = useState('browser'); 
 
-            const decDerivedKey = decKeyMode === 'phrase' && decPhrase ? generatePKey(decPhrase) : '';
+            const decDerivedKey = decKeyMode === 'phrase' && decPhrase ? window.SHEP32.generateKey(decPhrase, decIsExtended ? 1 : 0, 8) : '';
             const decActiveKey = decKeyMode === 'file' ? decKeyFileHex : (decKeyMode === 'phrase' ? decDerivedKey : decManualKey);
 
             const handleDecryptKeyFile = async (file) => {
-                const text = await file.text();
-                const match = text.match(/-----BEGIN SHEP32 KEY-----\n([a-f0-9]{64})\n-----END SHEP32 KEY-----/i);
-                if (match) {
+                try {
+                    const text = await file.text();
+                    const keyStr = window.SHEP32.parseKeyFileText(text).trim();
                     setDecKeyFile(file);
-                    setDecKeyFileHex(match[1].toLowerCase());
+                    setDecKeyFileHex(keyStr);
                     setDecKeyMode('file');
                     setDecError('');
-                } else {
+                    if (keyStr.length === 72) setDecIsExtended(true);
+                    else if (keyStr.length === 64) setDecIsExtended(false);
+                } catch(e) {
                     setDecError('Invalid key file format.');
                 }
             };
 
             const handleDecryptFileUpload = async (file) => {
-                // Read as text since encrypted payloads are Base62 strings
                 const text = await file.text();
                 setDecFileData(text.trim());
                 setDecFile(file);
@@ -925,90 +700,56 @@
                 setDecError('');
             };
 
-            // --- PROGRESS ANIMATION LOGIC ---
-            const startProgressAnim = () => {
-                uiProgressRef.current = 0;
-                setUiProgress(0);
-                let lastTime = Date.now();
-                const animate = () => {
-                    const now = Date.now();
-                    const dt = now - lastTime;
-                    lastTime = now;
-                    let p = uiProgressRef.current;
-                    
-                    if (p < 0.20) p += 0.015 * (dt/16); // Fast ramp to 20%
-                    else if (p < 0.80) p += ((0.80 - p) * 0.01) * (dt/16); // Geometric slowdown
-                    else if (p < 0.99) p += 0.0005 * (dt/16); // Stall buffer
-                    
-                    uiProgressRef.current = p;
-                    setUiProgress(p);
-                    animFrameRef.current = requestAnimationFrame(animate);
-                };
-                animFrameRef.current = requestAnimationFrame(animate);
-            };
-
-            const stopProgressAnim = () => {
-                if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-                setUiProgress(1); // Snap to 100%
-            };
-
             // --- ENCRYPTION EXECUTION ---
             const executeEncrypt = () => {
                 setEncError('');
-                if (encInputType === 'file' && encFile.size > MAX_FILE_SIZE) {
-                    setEncError('File exceeds 100KB limit.'); return;
-                }
                 
                 let targetKey = encActiveKey;
                 let isAutoKey = false;
+                const modeValue = encIsExtended ? 1 : 0;
                 
                 if (!targetKey) {
                     let rawData = encInputType === 'file' ? encFile.name + encFile.size : encText;
-                    targetKey = generatePKey(rawData || 'auto');
+                    targetKey = window.SHEP32.generateKey(rawData || 'auto', modeValue, 8);
                     isAutoKey = true;
-                } else if (!/^[0-9a-f]{64}$/i.test(targetKey)) {
-                    setEncError('Active key must be exactly 64 hex characters.'); return;
+                } else {
+                    if (encIsExtended && !window.SHEP32.isExtendedKey(targetKey, 8)) {
+                        setEncError('Active key must be a valid SHEP333 extended key.'); return;
+                    } else if (!encIsExtended && !/^[0-9a-f]{64}$/i.test(targetKey)) {
+                        setEncError('Active key must be exactly 64 hex characters.'); return;
+                    }
                 }
 
                 setProcessingType('encrypt');
-                setProcessingSize(encInputType === 'file' ? encFile.size : encText.length);
                 setIsProcessing(true);
-                startProgressAnim();
 
-                // Defer to let UI update and paint the modal
                 setTimeout(async () => {
                     try {
-                        let payloadBytes;
+                        let payloadStr = '';
                         let origName = 'data';
                         
                         if (encInputType === 'file') {
                             origName = encFile.name;
-                            const extIdx = origName.lastIndexOf('.');
-                            const name = extIdx > -1 ? origName.substring(0, extIdx) : origName;
-                            const ext = extIdx > -1 ? origName.substring(extIdx) : '';
-                            const sizeStr = encFile.size.toString();
-                            
-                            const headerStr = `${META_HEADER}${name}\n${ext}\n${sizeStr}${META_DELIM}`;
-                            const headerBytes = new TextEncoder().encode(headerStr);
                             const fileBytes = new Uint8Array(await encFile.arrayBuffer());
-                            
-                            payloadBytes = new Uint8Array(headerBytes.length + fileBytes.length);
-                            payloadBytes.set(headerBytes, 0);
-                            payloadBytes.set(fileBytes, headerBytes.length);
+                            payloadStr = window.SHEP32.packFilePayload(origName, fileBytes);
                         } else {
-                            payloadBytes = encText; // String directly handled by toBytesPython
+                            payloadStr = encText; 
                         }
 
-                        const outResult = encryptData(payloadBytes, targetKey);
+                        const isCompressibleFile = (encInputType === 'file' && encFile.size > 5120);
+                        const outResult = await window.SHEP32.encryptDataAsync(payloadStr, targetKey, modeValue, 8, false, isCompressibleFile);
                         
-                        stopProgressAnim();
-                        setTimeout(() => {
-                            setIsProcessing(false);
-                            setEncResult({ c: outResult.c, keyUsed: outResult.k, origName, isFile: encInputType === 'file', isAutoKey });
-                        }, 300);
+                        setIsProcessing(false);
+                        setEncResult({ 
+                            c: outResult.cipher, 
+                            keyUsed: outResult.key, 
+                            origName, 
+                            isFile: encInputType === 'file', 
+                            isAutoKey,
+                            customName: encOutputName.trim()
+                        });
 
                     } catch (e) {
-                        stopProgressAnim();
                         setIsProcessing(false);
                         setEncError("Encryption failed: " + e.message);
                     }
@@ -1018,7 +759,10 @@
             // --- DECRYPTION EXECUTION ---
             const executeDecrypt = () => {
                 setDecError('');
-                if (!decActiveKey || !/^[0-9a-f]{64}$/i.test(decActiveKey)) {
+                
+                if (decIsExtended && !window.SHEP32.isExtendedKey(decActiveKey, 8)) {
+                    setDecError('Active key must be a valid SHEP333 extended key.'); return;
+                } else if (!decIsExtended && !/^[0-9a-f]{64}$/i.test(decActiveKey)) {
                     setDecError('Active key must be exactly 64 hex characters.'); return;
                 }
 
@@ -1028,63 +772,174 @@
                 }
 
                 setProcessingType('decrypt');
-                setProcessingSize(payloadStr.length);
                 setIsProcessing(true);
-                startProgressAnim();
 
-                setTimeout(() => {
+                setTimeout(async () => {
                     try {
-                        const outBytes = decryptData(payloadStr, decActiveKey);
+                        const modeValue = decIsExtended ? 333 : 0;
+                        const outText = await window.SHEP32.decryptDataExAsync(payloadStr, decActiveKey, modeValue, 8);
                         
-                        // Parse metadata
                         let isFileRestored = false;
                         let restoredName = 'restored_data.bin';
-                        let pureData = outBytes;
+                        let pureData = new Uint8Array(0);
                         let textResult = '';
 
-                        try {
-                            const peekLen = Math.min(outBytes.length, 500);
-                            const peekStr = new TextDecoder('utf-8').decode(outBytes.slice(0, peekLen));
-                            if (peekStr.startsWith(META_HEADER)) {
-                                const lines = peekStr.split('\n');
-                                if (lines.length >= 5) {
-                                    const name = lines[1];
-                                    const ext = lines[2];
-                                    restoredName = name + ext;
-                                    const headerStr = lines.slice(0, 4).join('\n') + META_DELIM;
-                                    const headerBytesLen = new TextEncoder().encode(headerStr).length;
-                                    pureData = outBytes.slice(headerBytesLen);
-                                    isFileRestored = true;
-                                }
-                            }
-                        } catch(e) { }
+                        const unpackedFile = window.SHEP32.unpackFilePayload(outText);
 
-                        if (!isFileRestored && decOutputChoice === 'browser') {
-                            try {
-                                let chars = [];
-                                for (let i = 0; i < pureData.length; i += 2) {
-                                    let low = pureData[i];
-                                    let high = pureData[i+1] !== undefined ? pureData[i+1] : 0;
-                                    chars.push(String.fromCharCode((high << 8) | low));
-                                }
-                                textResult = chars.join('');
-                            } catch(e) {
-                                throw new Error('Failed to decode string.');
+                        if (unpackedFile) {
+                            isFileRestored = true;
+                            restoredName = unpackedFile.name;
+                            pureData = unpackedFile.data;
+                        } else {
+                            textResult = outText;
+                            if (decOutputChoice === 'file') {
+                                pureData = new TextEncoder().encode(textResult);
                             }
                         }
 
-                        stopProgressAnim();
-                        setTimeout(() => {
-                            setIsProcessing(false);
-                            setDecResult({ isFile: isFileRestored || decOutputChoice === 'file', name: restoredName, dataBytes: pureData, text: textResult });
-                        }, 300);
+                        setIsProcessing(false);
+                        setDecResult({ isFile: isFileRestored || decOutputChoice === 'file', name: restoredName, dataBytes: pureData, text: textResult });
 
                     } catch (e) {
-                        stopProgressAnim();
                         setIsProcessing(false);
                         setDecError("Decryption failed: Invalid key or corrupted data structure.");
                     }
                 }, 100);
+            };
+
+            // --- BENCHMARK ---
+            const [benchConfig, setBenchConfig] = useState({ iters: 5000, mode: 1, startCp: 0, extended: false });
+            // FIXED: Initialized shepAllHashes and shaAllHashes in the initial benchmark status
+            const [benchStatus, setBenchStatus] = useState({ 
+                running: false, current: 0, betterTally: { shep: 0, sha: 0 }, history: [], shepAllHashes: [], shaAllHashes: [] 
+            });
+            const abortRef = useRef(false);
+
+            const runBenchmark = async () => {
+                setBenchStatus(prev => ({ 
+                    ...prev, running: true, current: 0, history: [], betterTally: { shep: 0, sha: 0 }, shepAllHashes: [], shaAllHashes: [] 
+                }));
+                abortRef.current = false;
+                
+                let shepMxAll = initMatrix();
+                let shaMxAll = initMatrix();
+                let currentCp = benchConfig.startCp;
+                const endCp = 0x10FFFF;
+                const chunkLen = 32;
+                const CHUNK_SIZE = 100;
+                const total = Math.min(benchConfig.iters, 250000);
+                
+                let shepHList = [];
+                let shaHList = [];
+                let newBetterTally = { shep: 0, sha: 0 };
+
+                for (let i = 0; i < total; i += CHUNK_SIZE) {
+                    if (abortRef.current) break;
+                    const end = Math.min(i + CHUNK_SIZE, total);
+                    let catName = "";
+                    let lastLen = 0;
+                    let shepOk = 0;
+                    let shaOk = 0;
+
+                    for (let j = i; j < end; j++) {
+                        let s = "";
+                        if (benchConfig.mode === 0) {
+                            const n = Math.floor(Math.random() * (100 - 5 + 1)) + 5;
+                            s = window.SHEP32.encodeHex ? window.SHEP32.encodeHex(Math.floor(Math.random() * 1e15)) : Math.random().toString(36).substring(2);
+                            catName = "Random String";
+                        } else if (benchConfig.mode === 1) {
+                            if (currentCp > endCp) break;
+                            let a = currentCp;
+                            let b = Math.min(endCp, currentCp + chunkLen - 1);
+                            for (let x = a; x <= b; x++) if (!(x >= 0xD800 && x <= 0xDFFF)) s += String.fromCodePoint(x);
+                            catName = `uSeq=${a}-${b},len=${chunkLen}`;
+                            currentCp = b + 1;
+                        } else if (benchConfig.mode === 2) {
+                            if (currentCp > endCp) break;
+                            while (currentCp >= 0xD800 && currentCp <= 0xDFFF && currentCp <= endCp) currentCp++;
+                            if (currentCp > endCp) break;
+                            s = String.fromCodePoint(currentCp);
+                            catName = `progress=${currentCp}`;
+                            currentCp++;
+                        }
+                        
+                        lastLen = s.length;
+                        if (!s) continue;
+
+                        const rawKey = window.SHEP32.generateKey(s, benchConfig.extended ? 1 : 0, 8);
+                        // FIXED: Added fallback for bodyHex extraction if unpackExtendedKey is missing
+                        let shepH = rawKey;
+                        if (benchConfig.extended) {
+                            shepH = (window.SHEP32.unpackExtendedKey) ? window.SHEP32.unpackExtendedKey(rawKey, 8).bodyHex : rawKey.substring(4, 68);
+                        }
+                        const shaH = await sha256Hash(s);
+
+                        shepHList.push(shepH);
+                        shaHList.push(shaH);
+                        
+                        pushHex(shepMxAll, shepH); shepOk++;
+                        pushHex(shaMxAll, shaH); shaOk++;
+                    }
+
+                    let [shepBitLen, shepOnesPct, shepEnt, shepRunsP, shepAvgHam] = keyStats(shepHList);
+                    let [shaBitLen, shaOnesPct, shaEnt, shaRunsP, shaAvgHam] = keyStats(shaHList);
+                    
+                    let shepPosU = posUniform(shepMxAll);
+                    let shepGlobU = globalUniform(shepMxAll);
+                    let shaPosU = posUniform(shaMxAll);
+                    let shaGlobU = globalUniform(shaMxAll);
+
+                    let shepBitAbs = bitAbsScore(shepBitLen, shepOnesPct, shepEnt, shepRunsP, shepAvgHam);
+                    let shepMatAbs = matrixAbsScore(shepPosU, shepGlobU);
+
+                    let shaBitAbs = bitAbsScore(shaBitLen, shaOnesPct, shaEnt, shaRunsP, shaAvgHam);
+                    let shaMatAbs = matrixAbsScore(shaPosU, shaGlobU);
+
+                    let shepAbs = (0.55 * shepBitAbs) + (0.45 * shepMatAbs);
+                    let shaAbs = (0.55 * shaBitAbs) + (0.45 * shaMatAbs);
+
+                    let [shepFinal, shaFinal] = fairPairScores(shepAbs, shaAbs);
+                    
+                    let betterName = shepFinal > shaFinal ? "SHEP32" : (shaFinal > shepFinal ? "SHA256" : "TIE");
+                    if(betterName === "SHEP32") newBetterTally.shep++;
+                    else if(betterName === "SHA256") newBetterTally.sha++;
+
+                    // FIXED: Now accurately tracks shepAllHashes and shaAllHashes 
+                    setBenchStatus(prev => ({
+                        ...prev,
+                        current: end,
+                        betterTally: { ...newBetterTally },
+                        history: [...prev.history, {
+                            iter: end, cat: catName, len: lastLen,
+                            shepOk, shaOk,
+                            shepOnes: shepOnesPct, shaOnes: shaOnesPct,
+                            shepEnt: shepEnt, shaEnt: shaEnt,
+                            shepRuns: shepRunsP, shaRuns: shaRunsP,
+                            shepHam: shepAvgHam, shaHam: shaAvgHam,
+                            shepPosU: shepPosU * 100, shaPosU: shaPosU * 100,
+                            shepGlobU: shepGlobU * 100, shaGlobU: shaGlobU * 100,
+                            shepAbs, shaAbs, 
+                            shepFinal, shaFinal, better: betterName
+                        }],
+                        shepAllHashes: shepHList,
+                        shaAllHashes: shaHList
+                    }));
+
+                    await new Promise(r => setTimeout(r, 10)); // Yield to UI
+                }
+
+                setBenchStatus(prev => ({ ...prev, running: false }));
+            };
+
+            // FIXED: Added missing downloadCSV function to App component
+            const downloadCSV = () => {
+                if(!benchStatus.history.length) return;
+                const headers = "iter,category,len,shepOk,shaOk,shepOnes,shaOnes,shepEnt,shaEnt,shepRuns,shaRuns,shepHam,shaHam,shepPosU,shaPosU,shepGlobU,shaGlobU,shepAbs,shaAbs,shepFinal,shaFinal,better\n";
+                const rows = benchStatus.history.map(r => 
+                    `${r.iter},${r.cat},${r.len},${r.shepOk},${r.shaOk},${formatNum(r.shepOnes)},${formatNum(r.shaOnes)},${formatNum(r.shepEnt,3)},${formatNum(r.shaEnt,3)},${formatNum(r.shepRuns,4)},${formatNum(r.shaRuns,4)},${formatNum(r.shepHam)},${formatNum(r.shaHam)},${formatNum(r.shepPosU)},${formatNum(r.shaPosU)},${formatNum(r.shepGlobU)},${formatNum(r.shaGlobU)},${formatNum(r.shepAbs)},${formatNum(r.shaAbs)},${formatNum(r.shepFinal)},${formatNum(r.shaFinal)},${r.better}`
+                ).join("\n");
+                
+                downloadTextFile(headers + rows, "SHEP32_Benchmark_Stats.csv");
             };
 
             const copyToClipboard = (text) => {
@@ -1097,14 +952,36 @@
             };
 
             const resetAll = () => {
-                setEncInputType(null); setEncText(''); setEncFile(null); setEncKeyMode('manual'); setEncManualKey(''); setEncPhrase(''); setEncKeyFile(null); setEncKeyFileHex(''); setEncError(''); setEncResult(null);
+                setEncInputType(null); setEncText(''); setEncFile(null); setEncOutputName(''); setEncKeyMode('manual'); setEncManualKey(''); setEncPhrase(''); setEncKeyFile(null); setEncKeyFileHex(''); setEncError(''); setEncResult(null);
                 setDecInputType(null); setDecText(''); setDecFile(null); setDecFileData(''); setDecKeyMode('manual'); setDecManualKey(''); setDecPhrase(''); setDecKeyFile(null); setDecKeyFileHex(''); setDecError(''); setDecResult(null);
                 setGenPhrase(''); setGenResult(''); setGenUsePhrase(false);
             };
 
+            const visibleHistory = benchStatus.history.slice(-10);
+            const paddingRows = Math.max(0, 10 - visibleHistory.length);
+            const latestStats = visibleHistory.length > 0 ? visibleHistory[visibleHistory.length - 1] : null;
+
+            if (!coreLoaded) {
+                return (
+                    <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-4">
+                        <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl max-w-md w-full text-center shadow-2xl">
+                            <Icon n="shield" className="w-12 h-12 text-cyan-500 mx-auto mb-4 animate-pulse" />
+                            <h2 className="text-xl font-bold text-white mb-2 uppercase tracking-widest">Initializing Core</h2>
+                            {coreError ? (
+                                <div className="text-red-400 text-xs mt-4 bg-red-950/30 p-3 rounded border border-red-900/50 break-words">
+                                    {coreError}
+                                </div>
+                            ) : (
+                                <p className="text-zinc-500 text-xs font-mono uppercase">Fetching SHEP32 Universal Module...</p>
+                            )}
+                        </div>
+                    </div>
+                );
+            }
+
             return (
                 <div className="min-h-screen flex flex-col items-center p-4 md:p-8 relative">
-                    <ProgressModal isVisible={isProcessing} progress={uiProgress} isEncrypt={processingType === 'encrypt'} sizeBytes={processingSize} />
+                    <ProgressModal isVisible={isProcessing} isEncrypt={processingType === 'encrypt'} done={progressDone} total={progressTotal} />
                     <ConfirmModal 
                         isOpen={resetModal.open} 
                         title="Reset Application" 
@@ -1113,11 +990,10 @@
                         onConfirm={() => { resetModal.onConfirm && resetModal.onConfirm(); }}
                     />
 
-                    <div className="w-full max-w-4xl flex-grow flex flex-col">
-                        {/* Header */}
+                    <div className="w-full max-w-5xl flex-grow flex flex-col">
                         <header className="mb-8 flex flex-col md:flex-row md:items-end gap-4 md:gap-6 border-b border-zinc-800 pb-8">
                             <div className="p-4 bg-zinc-900 rounded-2xl border border-zinc-800 shadow-xl mx-auto md:mx-0">
-                                <Shield className="w-10 h-10 text-cyan-500" />
+                                <Icon n="shield" className="w-10 h-10 text-cyan-500" />
                             </div>
                             <div className="flex-grow text-center md:text-left">
                                 <h1 className="text-4xl md:text-5xl font-black text-white tracking-tighter">SHEP-32</h1>
@@ -1128,7 +1004,7 @@
                             <div className="flex items-center gap-4 bg-zinc-900/40 p-2 rounded-lg border border-zinc-800/50 self-center md:self-end">
                                 <div className="text-right hidden sm:block">
                                     <p className="text-[10px] text-zinc-500 font-mono leading-none">VERSION</p>
-                                    <p className="text-xs text-zinc-400 font-mono uppercase tracking-tighter">0.7.5-STANDALONE</p>
+                                    <p className="text-xs text-zinc-400 font-mono uppercase tracking-tighter">2.60.4-UNIVERSAL</p>
                                 </div>
                                 <div className="h-8 w-px bg-zinc-800 hidden sm:block" />
                                 <div className="flex flex-col items-center">
@@ -1138,38 +1014,104 @@
                             </div>
                         </header>
 
-                        {/* Navigation */}
-                        <nav className="flex bg-zinc-900 p-1 rounded-xl border border-zinc-800 mb-8 self-start w-full md:w-auto overflow-x-auto">
-                            {['encrypt', 'decrypt', 'generate'].map((tab) => (
+                        <nav className="flex bg-zinc-900 p-1 rounded-xl border border-zinc-800 mb-8 self-start w-full md:w-auto overflow-x-auto shrink-0">
+                            {['about', 'encrypt', 'decrypt', 'generate', 'cli', 'benchmark'].map((tab) => (
                                 <button 
                                     key={tab}
                                     onClick={() => setActiveTab(tab)}
-                                    className={`flex-1 md:flex-none px-6 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 uppercase tracking-wider whitespace-nowrap ${activeTab === tab ? 'bg-cyan-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}
+                                    className={`flex-1 md:flex-none px-5 py-2.5 rounded-lg text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center gap-2 uppercase tracking-wider whitespace-nowrap ${activeTab === tab ? 'bg-cyan-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}
                                 >
-                                    {tab === 'encrypt' ? <Lock className="w-4 h-4"/> : tab === 'decrypt' ? <Unlock className="w-4 h-4"/> : <KeyIcon className="w-4 h-4"/>}
-                                    {tab === 'generate' ? 'Generate Key' : tab}
+                                    <Icon n={tab === 'about' ? 'info' : tab === 'encrypt' ? 'lock' : tab === 'decrypt' ? 'unlock' : tab === 'generate' ? 'key' : tab === 'cli' ? 'terminal' : 'bar'} className="w-4 h-4"/>
+                                    {tab === 'generate' ? 'Generate Key' : tab === 'cli' ? 'CLI / API' : tab}
                                 </button>
                             ))}
                         </nav>
 
-                        {/* Main Content Area */}
                         <main className="flex-grow flex flex-col">
-                            
-                            {/* --- ENCRYPT TAB --- */}
+                            {activeTab === 'about' && (
+                                <div className="animate-in fade-in duration-300 space-y-6 max-w-4xl mx-auto w-full">
+                                    <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6 md:p-8 shadow-xl">
+                                        <div className="flex items-center gap-3 mb-6 border-b border-zinc-800 pb-4">
+                                            <Icon n="info" className="w-6 h-6 text-cyan-500" />
+                                            <h2 className="text-xl font-bold text-white uppercase tracking-widest">About SHEP-32</h2>
+                                        </div>
+                                        
+                                        <div className="space-y-6 text-sm text-zinc-400 leading-relaxed font-sans">
+                                            <section>
+                                                <h3 className="text-white font-bold mb-2 uppercase tracking-wider text-xs">What is SHEP-32?</h3>
+                                                <p className="mb-2">
+                                                    SHEP-32 is a deterministic key generation, encryption, decryption, signing, and verification system. The name SHEP-32 refers to the primary 32-byte output format, which is typically represented as a 64-character hexadecimal key.
+                                                </p>
+                                                <p className="mb-2">The project supports two key formats:</p>
+                                                <ul className="list-disc pl-5 space-y-1 mb-2 text-zinc-300">
+                                                    <li><strong>SHEP-32:</strong> the primary 32-byte key format</li>
+                                                    <li><strong>SHEP333:</strong> the extended 333-bit key format</li>
+                                                </ul>
+                                                <p>
+                                                    SHEP333 is the extended mode built for the wider output path. It is distinct from the standard 32-byte SHEP-32 format.
+                                                </p>
+                                            </section>
+
+                                            <section>
+                                                <h3 className="text-white font-bold mb-2 uppercase tracking-wider text-xs">What this application does</h3>
+                                                <p className="mb-2">This interface provides local access to the core SHEP features, including:</p>
+                                                <ul className="list-disc pl-5 space-y-1 mb-2 text-zinc-300">
+                                                    <li>deterministic key generation</li>
+                                                    <li>text and file encryption</li>
+                                                    <li>text and file decryption</li>
+                                                    <li>detached body and metadata mode</li>
+                                                    <li>public key derivation</li>
+                                                    <li>signing and verification</li>
+                                                    <li>CLI-style command execution in the browser</li>
+                                                </ul>
+                                                <p>
+                                                    The system supports both direct text input and wrapped file payloads. Encrypted data may be stored as a single token or as detached body and metadata components, depending on the selected mode.
+                                                </p>
+                                            </section>
+
+                                            <section>
+                                                <h3 className="text-white font-bold mb-2 uppercase tracking-wider text-xs">Offline and local use</h3>
+                                                <p>
+                                                    This application runs entirely in your local browser session. No data is uploaded, transmitted, or stored on any remote server by this page. You can safely save this page https://raw.githubusercontent.com/andylehti/SHEP32/refs/heads/main/index.html file and execute it in an entirely offline environment.
+                                                </p>
+                                            </section>
+
+                                            <section>
+                                                <h3 className="text-white font-bold mb-2 uppercase tracking-wider text-xs">How to use</h3>
+                                                <ul className="list-disc pl-5 space-y-2 text-zinc-300">
+                                                    <li><strong>Generate a Key:</strong> Use the <strong>Generate Key</strong> tab to create a mathematically secure 64-character hex key. You can safely download this <code className="bg-zinc-800 text-zinc-200 px-1 rounded">.pkey</code> file to your machine.</li>
+                                                    <li><strong>Encrypt Data:</strong> Provide a plaintext string or drop a file directly into the <strong>Encrypt</strong> tab. Supply your key to generate the resulting Base62 ciphertext payload (<code className="bg-zinc-800 text-zinc-200 px-1 rounded">.shep32</code> / <code className="bg-zinc-800 text-zinc-200 px-1 rounded">.sh3</code>).</li>
+                                                    <li><strong>Decrypt Data:</strong> Paste the Base62 payload or upload an encrypted file into the <strong>Decrypt</strong> tab. You must provide the exact identical key to recover the original structural data.</li>
+                                                    <li><strong>CLI & API:</strong> Explore the raw <strong>CLI / API</strong> functions to execute standalone commands natively within your browser.</li>
+                                                </ul>
+                                            </section>
+
+                                            <section>
+                                                <h3 className="text-white font-bold mb-2 uppercase tracking-wider text-xs">Output formats</h3>
+                                                <ul className="list-disc pl-5 space-y-1 text-zinc-300">
+                                                    <li>SHEP-32 keys are 32 bytes.</li>
+                                                    <li>SHEP333 keys are 333 bits.</li>
+                                                </ul>
+                                            </section>
+                                            
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
                             {activeTab === 'encrypt' && (
-                                <div className="animate-in fade-in duration-300">
+                                <div className="animate-in fade-in duration-300 max-w-4xl mx-auto w-full">
                                     {!encResult ? (
                                         <div className="space-y-6">
-                                            {/* Input Section */}
                                             <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6">
                                                 <h2 className="text-sm font-bold text-white uppercase tracking-widest mb-4 flex items-center">
                                                     1. Input Data
-                                                    <InfoTooltip text="Provide text or drop a file. Files are strictly capped at 100KB. Files are prepended with structure metadata." />
+                                                    <InfoTooltip text="Provide text or drop a file. Files >5KB are dynamically compressed. All files are prepended with structure metadata." />
                                                 </h2>
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                                     <div className="flex flex-col">
                                                         <textarea 
-                                                            className={`w-full h-32 bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-sm font-mono text-cyan-100/80 outline-none transition-all resize-none ${encInputType === 'file' ? 'opacity-30 cursor-not-allowed' : 'focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500'}`}
+                                                            className={`w-full h-36 bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-sm font-mono text-cyan-100/80 outline-none transition-all resize-none ${encInputType === 'file' ? 'opacity-30 cursor-not-allowed' : 'focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500'}`}
                                                             placeholder="Paste plain text here..."
                                                             value={encText}
                                                             disabled={encInputType === 'file'}
@@ -1179,7 +1121,19 @@
                                                                 else if(!encFile) setEncInputType(null);
                                                             }}
                                                         />
-                                                        {encInputType === 'text' && <span className="text-[10px] text-cyan-500 font-mono mt-2 text-right">Text mode active • {encText.length} chars</span>}
+                                                        {encInputType === 'text' && (
+                                                            <div className="mt-3 animate-in fade-in duration-300">
+                                                                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5">Custom Filename (Optional)</label>
+                                                                <input
+                                                                    type="text"
+                                                                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-xs font-mono text-cyan-400 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none transition-all"
+                                                                    placeholder="e.g. secret_message"
+                                                                    value={encOutputName}
+                                                                    onChange={(e) => setEncOutputName(e.target.value)}
+                                                                />
+                                                                <div className="text-[10px] text-cyan-500 font-mono mt-1 text-right">{encText.length} chars</div>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                     <div className="flex flex-col justify-center">
                                                         <FileDropzone 
@@ -1188,7 +1142,6 @@
                                                             disabled={encInputType === 'text'} 
                                                             file={encFile}
                                                             onFile={(f) => {
-                                                                if(f.size > MAX_FILE_SIZE) { setEncError('File exceeds 100KB limit.'); return; }
                                                                 setEncFile(f); setEncInputType('file'); setEncError('');
                                                             }}
                                                         />
@@ -1201,7 +1154,6 @@
                                                 </div>
                                             </div>
 
-                                            {/* Key Section */}
                                             <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6">
                                                 <div className="flex justify-between items-center mb-4">
                                                     <h2 className="text-sm font-bold text-white uppercase tracking-widest flex items-center">
@@ -1215,19 +1167,31 @@
 
                                                 <div className="flex flex-col md:flex-row gap-6 items-start">
                                                     <div className="flex-grow w-full space-y-3">
-                                                        <div className="flex items-center gap-2">
-                                                            <input 
-                                                                type="checkbox" 
-                                                                id="encUsePhrase" 
-                                                                checked={encKeyMode === 'phrase'} 
-                                                                disabled={encKeyMode === 'file'}
-                                                                onChange={(e) => {
-                                                                    setEncKeyMode(e.target.checked ? 'phrase' : 'manual');
-                                                                    setEncError('');
-                                                                }} 
-                                                                className="accent-cyan-500 w-4 h-4 rounded border-zinc-800 bg-zinc-950"
-                                                            />
-                                                            <label htmlFor="encUsePhrase" className={`text-xs font-bold ${encKeyMode==='file' ? 'text-zinc-600' : 'text-zinc-400'}`}>Use keyphrase (derives key via generatePKey)</label>
+                                                        <div className="flex items-center gap-6">
+                                                            <div className="flex items-center gap-2">
+                                                                <input 
+                                                                    type="checkbox" 
+                                                                    id="encUsePhrase" 
+                                                                    checked={encKeyMode === 'phrase'} 
+                                                                    disabled={encKeyMode === 'file'}
+                                                                    onChange={(e) => {
+                                                                        setEncKeyMode(e.target.checked ? 'phrase' : 'manual');
+                                                                        setEncError('');
+                                                                    }} 
+                                                                    className="accent-cyan-500 w-4 h-4 rounded border-zinc-800 bg-zinc-950"
+                                                                />
+                                                                <label htmlFor="encUsePhrase" className={`text-xs font-bold ${encKeyMode==='file' ? 'text-zinc-600' : 'text-zinc-400'}`}>Use keyphrase</label>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <input 
+                                                                    type="checkbox" 
+                                                                    id="encIsExt" 
+                                                                    checked={encIsExtended} 
+                                                                    onChange={(e) => setEncIsExtended(e.target.checked)} 
+                                                                    className="accent-cyan-500 w-4 h-4 rounded border-zinc-800 bg-zinc-950"
+                                                                />
+                                                                <label htmlFor="encIsExt" className="text-xs font-bold text-zinc-400">SHEP333</label>
+                                                            </div>
                                                         </div>
                                                         {encKeyMode === 'phrase' ? (
                                                             <div className="space-y-2">
@@ -1238,10 +1202,10 @@
                                                                     onChange={(e) => setEncPhrase(e.target.value)}
                                                                     className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-sm text-white focus:border-cyan-500 outline-none"
                                                                 />
-                                                                <p className="text-[10px] text-amber-500 flex items-center gap-1"><Info className="w-3 h-3"/> Keyphrases are inherently less secure than generated keys.</p>
+                                                                <p className="text-[10px] text-amber-500 flex items-center gap-1"><Icon n="info" className="w-3 h-3"/> Keyphrases are inherently less secure than generated keys.</p>
                                                                 {encDerivedKey && (
                                                                     <div className="mt-3 p-3 bg-zinc-950 rounded-lg border border-zinc-800">
-                                                                        <span className="text-[10px] text-zinc-500 uppercase block mb-1">Derived 64-Hex Key</span>
+                                                                        <span className="text-[10px] text-zinc-500 uppercase block mb-1">Derived {encIsExtended ? 'SHEP333' : '64-Hex'} Key</span>
                                                                         <span className="text-xs font-mono text-cyan-400 break-all">{encDerivedKey}</span>
                                                                     </div>
                                                                 )}
@@ -1249,11 +1213,15 @@
                                                         ) : (
                                                             <input 
                                                                 type="text" 
-                                                                placeholder="Enter 64-character hex key (Optional)" 
+                                                                placeholder={`Enter ${encIsExtended ? 'SHEP333' : '64-character hex'} key (Optional)`} 
                                                                 value={encManualKey}
                                                                 disabled={encKeyMode === 'file'}
-                                                                onChange={(e) => setEncManualKey(e.target.value.toLowerCase().replace(/[^0-9a-f]/g, ''))}
-                                                                maxLength={64}
+                                                                onChange={(e) => {
+                                                                    let val = e.target.value.trim();
+                                                                    if (!encIsExtended) val = val.toLowerCase().replace(/[^0-9a-f]/g, '');
+                                                                    setEncManualKey(val);
+                                                                }}
+                                                                maxLength={encIsExtended ? 72 : 64}
                                                                 className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-sm font-mono text-cyan-400 focus:border-cyan-500 outline-none disabled:opacity-30 disabled:cursor-not-allowed"
                                                             />
                                                         )}
@@ -1276,7 +1244,6 @@
                                                 </div>
                                             </div>
 
-                                            {/* Action Section */}
                                             <div className="flex flex-col items-center gap-4">
                                                 {encError && <div className="text-xs font-bold text-red-400 bg-red-950/30 border border-red-900/50 px-4 py-2 rounded-lg w-full text-center">{encError}</div>}
                                                 <button 
@@ -1284,23 +1251,22 @@
                                                     disabled={!encInputType}
                                                     className="w-full md:w-auto px-12 py-4 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold text-sm uppercase tracking-widest shadow-[0_0_20px_rgba(6,182,212,0.15)] disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none transition-all flex items-center justify-center gap-2"
                                                 >
-                                                    <Lock className="w-5 h-5" /> Execute Encryption
+                                                    <Icon n="lock" className="w-5 h-5" /> Execute Encryption
                                                 </button>
                                                 <button onClick={() => setResetModal({ open: true, onConfirm: resetAll })} className="text-xs text-zinc-500 hover:text-zinc-300 font-bold uppercase tracking-wider">Reset Form</button>
                                             </div>
                                         </div>
                                     ) : (
-                                        /* Encrypt Result State */
                                         <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6 md:p-10 text-center animate-in zoom-in-95 duration-500 shadow-2xl relative overflow-hidden">
                                             <div className="absolute top-0 right-0 p-4 opacity-5">
-                                                <Shield className="w-48 h-48 -mr-12 -mt-12" />
+                                                <Icon n="shield" className="w-48 h-48 -mr-12 -mt-12" />
                                             </div>
                                             <div className="w-16 h-16 bg-cyan-500/20 border border-cyan-500/50 rounded-full flex items-center justify-center mx-auto mb-6">
-                                                <Check className="w-8 h-8 text-cyan-400" />
+                                                <Icon n="check" className="w-8 h-8 text-cyan-400" />
                                             </div>
                                             <h2 className="text-2xl font-black text-white mb-2 tracking-tight">Encryption Complete</h2>
                                             <p className="text-zinc-400 text-sm mb-8 font-mono bg-zinc-950 inline-block px-4 py-1.5 rounded-md border border-zinc-800">
-                                                Target: {encResult.isFile ? encResult.origName : 'Plaintext Stream'}
+                                                Target: {encResult.isFile ? encResult.origName : (encResult.customName ? `${encResult.customName}.shep32` : 'Plaintext Stream')}
                                             </p>
 
                                             {encResult.isAutoKey && (
@@ -1313,44 +1279,48 @@
                                                 <button 
                                                     onClick={() => {
                                                         const ext = encResult.isFile ? (DOC_EXTS.includes(encResult.origName.substring(encResult.origName.lastIndexOf('.')).toLowerCase()) ? '.sh3' : '.shep32') : '.shep32';
-                                                        const name = encResult.isFile ? encResult.origName.substring(0, encResult.origName.lastIndexOf('.')) || encResult.origName : 'encrypted_text';
+                                                        const name = encResult.isFile ? (encResult.origName.substring(0, encResult.origName.lastIndexOf('.')) || encResult.origName) : (encResult.customName || 'encrypted_text');
                                                         downloadBlob(encResult.c, `${name}${ext}`, 'text/plain');
                                                     }}
                                                     className="p-4 bg-zinc-800 hover:bg-zinc-700 rounded-xl border border-zinc-700 text-sm font-bold text-white flex flex-col items-center justify-center gap-2 transition-colors"
                                                 >
-                                                    <Download className="w-5 h-5" /> Download Encrypted Data
+                                                    <Icon n="dl" className="w-5 h-5" /> Download Encrypted Data
                                                 </button>
                                                 <button 
-                                                    onClick={() => handleDownloadKeyFile(encResult.keyUsed, 'encryption_key.pkey')}
+                                                    onClick={() => {
+                                                        const baseName = encResult.isFile ? (encResult.origName.substring(0, encResult.origName.lastIndexOf('.')) || encResult.origName) : (encResult.customName || 'encryption');
+                                                        const content = window.SHEP32.formatKeyFile(encResult.keyUsed);
+                                                        downloadBlob(content, `${baseName}_key.pkey`, 'text/plain');
+                                                    }}
                                                     className="p-4 bg-cyan-900/30 hover:bg-cyan-900/50 rounded-xl border border-cyan-800 text-sm font-bold text-cyan-400 flex flex-col items-center justify-center gap-2 transition-colors"
                                                 >
-                                                    <KeyIcon className="w-5 h-5" /> Download Key File (.pkey)
+                                                    <Icon n="key" className="w-5 h-5" /> Download Key File (.pkey)
                                                 </button>
                                                 <button 
                                                     onClick={() => { copyToClipboard(encResult.keyUsed); setGenCopied(true); setTimeout(()=>setGenCopied(false), 2000); }}
                                                     className="p-4 bg-zinc-800 hover:bg-zinc-700 rounded-xl border border-zinc-700 text-sm font-bold text-white flex flex-col items-center justify-center gap-2 transition-colors"
                                                 >
-                                                    {genCopied ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />} Copy Key to Clipboard
+                                                    {genCopied ? <Icon n="check" className="w-5 h-5" /> : <Icon n="copy" className="w-5 h-5" />} Copy Key to Clipboard
                                                 </button>
                                                 <button 
                                                     onClick={resetAll}
                                                     className="p-4 bg-zinc-900 hover:bg-zinc-800 rounded-xl border border-zinc-800 text-sm font-bold text-zinc-400 flex flex-col items-center justify-center gap-2 transition-colors"
                                                 >
-                                                    <RefreshCw className="w-5 h-5" /> Encrypt Another
+                                                    <Icon n="refresh" className="w-5 h-5" /> Encrypt Another
                                                 </button>
                                             </div>
 
                                             {!encResult.isFile && (
                                                 <div className="max-w-2xl mx-auto text-left">
                                                     <button onClick={() => setEncShowPreview(!encShowPreview)} className="text-xs font-bold text-cyan-500 hover:text-cyan-400 flex items-center gap-2 mb-2 uppercase tracking-wider">
-                                                        {encShowPreview ? <EyeOff className="w-4 h-4"/> : <Eye className="w-4 h-4"/>} 
+                                                        {encShowPreview ? <Icon n="eyeoff" className="w-4 h-4"/> : <Icon n="eye" className="w-4 h-4"/>} 
                                                         {encShowPreview ? 'Hide Preview' : 'Preview Encrypted Data (Base62)'}
                                                     </button>
                                                     {encShowPreview && (
                                                         <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 font-mono text-zinc-500 text-xs break-all max-h-64 overflow-y-auto shadow-inner relative">
                                                             {encResult.c.slice(0, 1000)}
                                                             {encResult.c.length > 1000 && <span className="text-zinc-600 block mt-2 italic">... (truncated for preview)</span>}
-                                                            <button onClick={() => copyToClipboard(encResult.c)} className="absolute top-2 right-2 p-1.5 bg-zinc-800 rounded text-zinc-400 hover:text-white"><Copy className="w-3.5 h-3.5"/></button>
+                                                            <button onClick={() => copyToClipboard(encResult.c)} className="absolute top-2 right-2 p-1.5 bg-zinc-800 rounded text-zinc-400 hover:text-white"><Icon n="copy" className="w-3.5 h-3.5"/></button>
                                                         </div>
                                                     )}
                                                 </div>
@@ -1360,12 +1330,10 @@
                                 </div>
                             )}
 
-                            {/* --- DECRYPT TAB --- */}
                             {activeTab === 'decrypt' && (
-                                <div className="animate-in fade-in duration-300">
+                                <div className="animate-in fade-in duration-300 max-w-4xl mx-auto w-full">
                                     {!decResult ? (
                                         <div className="space-y-6">
-                                            {/* Input Section */}
                                             <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6">
                                                 <h2 className="text-sm font-bold text-white uppercase tracking-widest mb-4 flex items-center">
                                                     1. Encrypted Data
@@ -1374,7 +1342,7 @@
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                                     <div className="flex flex-col">
                                                         <textarea 
-                                                            className={`w-full h-32 bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-sm font-mono text-cyan-100/80 outline-none transition-all resize-none ${decInputType === 'file' ? 'opacity-30 cursor-not-allowed' : 'focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500'}`}
+                                                            className={`w-full h-36 bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-sm font-mono text-cyan-100/80 outline-none transition-all resize-none ${decInputType === 'file' ? 'opacity-30 cursor-not-allowed' : 'focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500'}`}
                                                             placeholder="Paste Base62 ciphertext here..."
                                                             value={decText}
                                                             disabled={decInputType === 'file'}
@@ -1403,7 +1371,6 @@
                                                 </div>
                                             </div>
 
-                                            {/* Key Section */}
                                             <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6">
                                                 <div className="flex justify-between items-center mb-4">
                                                     <h2 className="text-sm font-bold text-white uppercase tracking-widest flex items-center">
@@ -1416,19 +1383,31 @@
 
                                                 <div className="flex flex-col md:flex-row gap-6 items-start">
                                                     <div className="flex-grow w-full space-y-3">
-                                                        <div className="flex items-center gap-2">
-                                                            <input 
-                                                                type="checkbox" 
-                                                                id="decUsePhrase" 
-                                                                checked={decKeyMode === 'phrase'} 
-                                                                disabled={decKeyMode === 'file'}
-                                                                onChange={(e) => {
-                                                                    setDecKeyMode(e.target.checked ? 'phrase' : 'manual');
-                                                                    setDecError('');
-                                                                }} 
-                                                                className="accent-cyan-500 w-4 h-4 rounded border-zinc-800 bg-zinc-950"
-                                                            />
-                                                            <label htmlFor="decUsePhrase" className={`text-xs font-bold ${decKeyMode==='file' ? 'text-zinc-600' : 'text-zinc-400'}`}>Use keyphrase (derives key via generatePKey)</label>
+                                                        <div className="flex items-center gap-6">
+                                                            <div className="flex items-center gap-2">
+                                                                <input 
+                                                                    type="checkbox" 
+                                                                    id="decUsePhrase" 
+                                                                    checked={decKeyMode === 'phrase'} 
+                                                                    disabled={decKeyMode === 'file'}
+                                                                    onChange={(e) => {
+                                                                        setDecKeyMode(e.target.checked ? 'phrase' : 'manual');
+                                                                        setDecError('');
+                                                                    }} 
+                                                                    className="accent-cyan-500 w-4 h-4 rounded border-zinc-800 bg-zinc-950"
+                                                                />
+                                                                <label htmlFor="decUsePhrase" className={`text-xs font-bold ${decKeyMode==='file' ? 'text-zinc-600' : 'text-zinc-400'}`}>Use keyphrase</label>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <input 
+                                                                    type="checkbox" 
+                                                                    id="decIsExt" 
+                                                                    checked={decIsExtended} 
+                                                                    onChange={(e) => setDecIsExtended(e.target.checked)} 
+                                                                    className="accent-cyan-500 w-4 h-4 rounded border-zinc-800 bg-zinc-950"
+                                                                />
+                                                                <label htmlFor="decIsExt" className="text-xs font-bold text-zinc-400">SHEP333 (Extended Key)</label>
+                                                            </div>
                                                         </div>
                                                         {decKeyMode === 'phrase' ? (
                                                             <div className="space-y-2">
@@ -1441,7 +1420,7 @@
                                                                 />
                                                                 {decDerivedKey && (
                                                                     <div className="mt-3 p-3 bg-zinc-950 rounded-lg border border-zinc-800">
-                                                                        <span className="text-[10px] text-zinc-500 uppercase block mb-1">Derived 64-Hex Key</span>
+                                                                        <span className="text-[10px] text-zinc-500 uppercase block mb-1">Derived {decIsExtended ? 'SHEP333' : '64-Hex'} Key</span>
                                                                         <span className="text-xs font-mono text-cyan-400 break-all">{decDerivedKey}</span>
                                                                     </div>
                                                                 )}
@@ -1449,11 +1428,15 @@
                                                         ) : (
                                                             <input 
                                                                 type="text" 
-                                                                placeholder="Enter exactly 64-character hex key" 
+                                                                placeholder={`Enter ${decIsExtended ? 'SHEP333' : '64-character hex'} key`} 
                                                                 value={decManualKey}
                                                                 disabled={decKeyMode === 'file'}
-                                                                onChange={(e) => setDecManualKey(e.target.value.toLowerCase().replace(/[^0-9a-f]/g, ''))}
-                                                                maxLength={64}
+                                                                onChange={(e) => {
+                                                                    let val = e.target.value.trim();
+                                                                    if (!decIsExtended) val = val.toLowerCase().replace(/[^0-9a-f]/g, '');
+                                                                    setDecManualKey(val);
+                                                                }}
+                                                                maxLength={decIsExtended ? 72 : 64}
                                                                 className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-sm font-mono text-cyan-400 focus:border-cyan-500 outline-none disabled:opacity-30 disabled:cursor-not-allowed"
                                                             />
                                                         )}
@@ -1476,7 +1459,6 @@
                                                 </div>
                                             </div>
 
-                                            {/* Action Section */}
                                             <div className="flex flex-col items-center gap-4">
                                                 {decInputType && (
                                                     <div className="flex items-center gap-4 bg-zinc-950 border border-zinc-800 p-2 rounded-lg">
@@ -1493,19 +1475,18 @@
                                                     disabled={!decInputType || !decActiveKey}
                                                     className="w-full md:w-auto px-12 py-4 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold text-sm uppercase tracking-widest shadow-[0_0_20px_rgba(6,182,212,0.15)] disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none transition-all flex items-center justify-center gap-2"
                                                 >
-                                                    <Unlock className="w-5 h-5" /> Execute Decryption
+                                                    <Icon n="unlock" className="w-5 h-5" /> Execute Decryption
                                                 </button>
                                                 <button onClick={() => setResetModal({ open: true, onConfirm: resetAll })} className="text-xs text-zinc-500 hover:text-zinc-300 font-bold uppercase tracking-wider">Reset Form</button>
                                             </div>
                                         </div>
                                     ) : (
-                                        /* Decrypt Result State */
                                         <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6 md:p-10 text-center animate-in zoom-in-95 duration-500 shadow-2xl relative overflow-hidden">
                                             <div className="absolute top-0 left-0 p-4 opacity-5">
-                                                <Unlock className="w-48 h-48 -ml-12 -mt-12" />
+                                                <Icon n="unlock" className="w-48 h-48 -ml-12 -mt-12" />
                                             </div>
                                             <div className="w-16 h-16 bg-cyan-500/20 border border-cyan-500/50 rounded-full flex items-center justify-center mx-auto mb-6">
-                                                <Check className="w-8 h-8 text-cyan-400" />
+                                                <Icon n="check" className="w-8 h-8 text-cyan-400" />
                                             </div>
                                             <h2 className="text-2xl font-black text-white mb-2 tracking-tight">Decryption Complete</h2>
                                             
@@ -1525,21 +1506,21 @@
                                                         onClick={() => downloadBlob(decResult.dataBytes, decResult.name)}
                                                         className="p-4 bg-cyan-900/30 hover:bg-cyan-900/50 rounded-xl border border-cyan-800 text-sm font-bold text-cyan-400 flex flex-col items-center justify-center gap-2 transition-colors"
                                                     >
-                                                        <Download className="w-5 h-5" /> Download Restored File
+                                                        <Icon n="dl" className="w-5 h-5" /> Download Restored File
                                                     </button>
                                                 ) : (
                                                     <button 
                                                         onClick={() => { copyToClipboard(decResult.text); setGenCopied(true); setTimeout(()=>setGenCopied(false), 2000); }}
                                                         className="p-4 bg-cyan-900/30 hover:bg-cyan-900/50 rounded-xl border border-cyan-800 text-sm font-bold text-cyan-400 flex flex-col items-center justify-center gap-2 transition-colors"
                                                     >
-                                                        {genCopied ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />} Copy Plaintext
+                                                        {genCopied ? <Icon n="check" className="w-5 h-5" /> : <Icon n="copy" className="w-5 h-5" />} Copy Plaintext
                                                     </button>
                                                 )}
                                                 <button 
                                                     onClick={resetAll}
                                                     className="p-4 bg-zinc-800 hover:bg-zinc-700 rounded-xl border border-zinc-700 text-sm font-bold text-white flex flex-col items-center justify-center gap-2 transition-colors"
                                                 >
-                                                    <RefreshCw className="w-5 h-5" /> Decrypt Another
+                                                    <Icon n="refresh" className="w-5 h-5" /> Decrypt Another
                                                 </button>
                                             </div>
 
@@ -1555,11 +1536,10 @@
                                 </div>
                             )}
 
-                            {/* --- GENERATE KEY TAB --- */}
                             {activeTab === 'generate' && (
                                 <div className="animate-in fade-in duration-300 max-w-3xl mx-auto w-full space-y-6">
                                     <div className="bg-amber-950/20 border border-amber-900/50 rounded-2xl p-4 flex items-start gap-4 text-amber-500">
-                                        <Info className="w-5 h-5 shrink-0 mt-0.5" />
+                                        <Icon n="info" className="w-5 h-5 shrink-0 mt-0.5" />
                                         <div className="text-xs">
                                             <strong className="block mb-1 text-amber-400 text-sm uppercase tracking-widest">Crucial Warning</strong>
                                             Save your generated keys securely. Cryptographic keys created here are not stored or logged anywhere. <strong>If you lose your key after encrypting data, recovery is mathematically impossible.</strong>
@@ -1567,18 +1547,30 @@
                                     </div>
 
                                     <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6 md:p-8 shadow-xl">
-                                        <div className="flex items-center gap-3 mb-6">
-                                            <input 
-                                                type="checkbox" 
-                                                id="genUsePhrase" 
-                                                checked={genUsePhrase} 
-                                                onChange={(e) => {
-                                                    setGenUsePhrase(e.target.checked);
-                                                    setGenResult('');
-                                                }} 
-                                                className="accent-cyan-500 w-4 h-4 rounded border-zinc-800 bg-zinc-950"
-                                            />
-                                            <label htmlFor="genUsePhrase" className="text-sm font-bold text-zinc-300">Use keyphrase to generate key (generatePKey(n))</label>
+                                        <div className="flex items-center gap-6 mb-6">
+                                            <div className="flex items-center gap-2">
+                                                <input 
+                                                    type="checkbox" 
+                                                    id="genUsePhrase" 
+                                                    checked={genUsePhrase} 
+                                                    onChange={(e) => {
+                                                        setGenUsePhrase(e.target.checked);
+                                                        setGenResult('');
+                                                    }} 
+                                                    className="accent-cyan-500 w-4 h-4 rounded border-zinc-800 bg-zinc-950"
+                                                />
+                                                <label htmlFor="genUsePhrase" className="text-sm font-bold text-zinc-300">Use keyphrase</label>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <input 
+                                                    type="checkbox" 
+                                                    id="genIsExt" 
+                                                    checked={genIsExtended} 
+                                                    onChange={(e) => setGenIsExtended(e.target.checked)} 
+                                                    className="accent-cyan-500 w-4 h-4 rounded border-zinc-800 bg-zinc-950"
+                                                />
+                                                <label htmlFor="genIsExt" className="text-sm font-bold text-zinc-400">SHEP333</label>
+                                            </div>
                                         </div>
 
                                         {genUsePhrase && (
@@ -1597,7 +1589,7 @@
                                                 disabled={genUsePhrase && !genPhrase.trim()}
                                                 className="flex-grow px-6 py-4 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold text-sm uppercase tracking-widest shadow-lg disabled:opacity-50 transition-all flex items-center justify-center gap-2"
                                             >
-                                                <KeyIcon className="w-5 h-5" /> Generate 64-Hex Key
+                                                <Icon n="key" className="w-5 h-5" /> Generate {genIsExtended ? 'SHEP333' : '64-Hex'} Key
                                             </button>
                                         </div>
 
@@ -1614,37 +1606,269 @@
                                                             className="p-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg transition-colors tooltip-trigger"
                                                             title="Copy to clipboard"
                                                         >
-                                                            {genCopied ? <Check className="w-5 h-5 text-green-400" /> : <Copy className="w-5 h-5" />}
+                                                            {genCopied ? <Icon n="check" className="w-5 h-5 text-green-400" /> : <Icon n="copy" className="w-5 h-5" />}
                                                         </button>
                                                         <button 
-                                                            onClick={() => handleDownloadKeyFile(genResult, 'shep32_key.pkey')}
+                                                            onClick={() => {
+                                                                const content = window.SHEP32.formatKeyFile(genResult);
+                                                                downloadBlob(content, 'shep32_key.pkey', 'text/plain');
+                                                            }}
                                                             className="p-2 bg-cyan-900/30 border border-cyan-800 hover:bg-cyan-900/50 text-cyan-400 rounded-lg transition-colors"
                                                             title="Save as .pkey"
                                                         >
-                                                            <Download className="w-5 h-5" />
+                                                            <Icon n="dl" className="w-5 h-5" />
                                                         </button>
                                                     </div>
-                                                </div>
-                                                <div className="mt-6 flex justify-center">
-                                                    <button onClick={resetAll} className="text-xs text-zinc-500 hover:text-zinc-300 font-bold uppercase tracking-wider flex items-center gap-1">
-                                                        <X className="w-3.5 h-3.5" /> Clear Outputs
-                                                    </button>
                                                 </div>
                                             </div>
                                         )}
                                     </div>
-                                    <div className="text-center mt-6">
-                                        <a href="https://andylehti.github.io/shep32key/" target="_blank" rel="noopener noreferrer" className="text-xs font-mono text-cyan-700 hover:text-cyan-400 uppercase tracking-widest border-b border-transparent hover:border-cyan-400 pb-0.5 transition-colors">
-                                            Benchmark Hashes →
-                                        </a>
-                                    </div>
                                 </div>
                             )}
 
+                            {activeTab === 'cli' && (
+                                <div className="animate-in fade-in duration-300 w-full">
+                                    <div className="mb-6 flex flex-wrap gap-3">
+                                        <button 
+                                            onClick={() => setCliViewMode('cli')} 
+                                            className={`px-6 py-2.5 rounded-lg font-bold text-xs uppercase tracking-widest transition-all ${cliViewMode === 'cli' ? 'bg-cyan-600 text-white shadow-md' : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-200'}`}
+                                        >
+                                            CLI Runner (runCli)
+                                        </button>
+                                        <button 
+                                            onClick={() => setCliViewMode('api')} 
+                                            className={`px-6 py-2.5 rounded-lg font-bold text-xs uppercase tracking-widest transition-all ${cliViewMode === 'api' ? 'bg-cyan-600 text-white shadow-md' : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-200'}`}
+                                        >
+                                            API Explorer ({apiFuncs.length})
+                                        </button>
+                                    </div>
+
+                                    {cliViewMode === 'cli' && window.SHEP32 && <CliRunner shep32Api={window.SHEP32} />}
+                                    
+                                    {cliViewMode === 'api' && apiFuncs.length > 0 && (
+                                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full">
+                                            {apiFuncs.map((funcDef, idx) => (
+                                                <FunctionCard key={idx} funcDef={funcDef} />
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {activeTab === 'benchmark' && (
+                                <div className="animate-in fade-in duration-300 w-full max-w-5xl mx-auto space-y-6">
+                                    <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 items-end">
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-bold text-zinc-500 uppercase">Iterations (Max 250k)</label>
+                                            <input 
+                                                type="number" 
+                                                max="250000"
+                                                value={benchConfig.iters}
+                                                onChange={e => setBenchConfig(prev => ({...prev, iters: parseInt(e.target.value)}))}
+                                                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm font-mono text-cyan-400 outline-none focus:border-cyan-500"
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-bold text-zinc-500 uppercase">Generation Mode</label>
+                                            <select 
+                                                value={benchConfig.mode}
+                                                onChange={e => setBenchConfig(prev => ({...prev, mode: parseInt(e.target.value)}))}
+                                                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm font-mono text-cyan-400 outline-none focus:border-cyan-500"
+                                            >
+                                                <option value={0}>Random String</option>
+                                                <option value={1}>Sequential Chunk (32)</option>
+                                                <option value={2}>Sequential Single CP</option>
+                                            </select>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-bold text-zinc-500 uppercase">Start CP Value</label>
+                                            <input 
+                                                type="number" 
+                                                value={benchConfig.startCp}
+                                                onChange={e => setBenchConfig(prev => ({...prev, startCp: parseInt(e.target.value)}))}
+                                                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm font-mono text-cyan-400 outline-none focus:border-cyan-500"
+                                            />
+                                        </div>
+                                        <div className="space-y-2 flex items-center justify-center pb-2">
+                                            <div className="flex items-center gap-2">
+                                                <input 
+                                                    type="checkbox" 
+                                                    id="benchExt" 
+                                                    checked={benchConfig.extended} 
+                                                    onChange={(e) => setBenchConfig(prev => ({...prev, extended: e.target.checked}))} 
+                                                    className="accent-cyan-500 w-4 h-4 rounded border-zinc-800 bg-zinc-950"
+                                                />
+                                                <label htmlFor="benchExt" className="text-[10px] font-bold text-zinc-400 uppercase">SHEP333</label>
+                                            </div>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            {!benchStatus.running ? (
+                                                <button 
+                                                    onClick={runBenchmark}
+                                                    className="flex-grow bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2.5 rounded-lg text-xs flex items-center justify-center gap-2 transition-all uppercase tracking-widest"
+                                                >
+                                                    <Icon n="play" className="w-4 h-4 fill-current" /> Run
+                                                </button>
+                                            ) : (
+                                                <button 
+                                                    onClick={() => abortRef.current = true}
+                                                    className="flex-grow bg-red-600 hover:bg-red-500 text-white font-bold py-2.5 rounded-lg text-xs flex items-center justify-center gap-2 transition-all uppercase tracking-widest"
+                                                >
+                                                    Stop
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6">
+                                        <div className="flex justify-between items-center mb-4">
+                                            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest flex items-center gap-2">
+                                                Benchmark Progress 
+                                            </span>
+                                            <span className="text-xs font-mono text-cyan-400">{benchStatus.current} / {benchConfig.iters}</span>
+                                        </div>
+                                        <div className="h-2 w-full bg-zinc-950 rounded-full overflow-hidden border border-zinc-800">
+                                            <div 
+                                                className="h-full bg-cyan-500 transition-all duration-300 shadow-[0_0_10px_rgba(6,182,212,0.5)]" 
+                                                style={{ width: `${(benchStatus.current / benchConfig.iters) * 100}%` }}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 shadow-xl">
+                                        <div className="flex justify-between items-center mb-4 border-b border-zinc-800 pb-3">
+                                            <h3 className="text-[10px] md:text-xs font-bold text-zinc-500 uppercase tracking-[0.2em] w-1/3">EVALUATION METRICS</h3>
+                                            <h3 className="text-[10px] md:text-xs font-bold text-cyan-500 uppercase tracking-[0.2em] w-1/3 text-center flex justify-center items-center gap-2">
+                                                <Icon n="shield" className="w-3.5 h-3.5 hidden sm:block"/> SHEP-32
+                                            </h3>
+                                            <h3 className="text-[10px] md:text-xs font-bold text-zinc-400 uppercase tracking-[0.2em] w-1/3 text-right flex justify-end items-center gap-2">
+                                                SHA-256
+                                            </h3>
+                                        </div>
+                                        <div className="flex flex-col">
+                                            <MetricRow label="Ones Percentage" shepVal={latestStats ? formatNum(latestStats.shepOnes, 2) + '%' : '—'} shaVal={latestStats ? formatNum(latestStats.shaOnes, 2) + '%' : '—'} />
+                                            <MetricRow label="Positional Uniformity" shepVal={latestStats ? formatNum(latestStats.shepPosU, 2) + '%' : '—'} shaVal={latestStats ? formatNum(latestStats.shaPosU, 2) + '%' : '—'} />
+                                            <MetricRow label="Global Uniformity" shepVal={latestStats ? formatNum(latestStats.shepGlobU, 2) + '%' : '—'} shaVal={latestStats ? formatNum(latestStats.shaGlobU, 2) + '%' : '—'} />
+                                            <MetricRow label="Avg Hamming Dist" shepVal={latestStats ? formatNum(latestStats.shepHam, 2) : '—'} shaVal={latestStats ? formatNum(latestStats.shaHam, 2) : '—'} />
+                                            <MetricRow label="Shannon Entropy" shepVal={latestStats ? formatNum(latestStats.shepEnt, 4) : '—'} shaVal={latestStats ? formatNum(latestStats.shaEnt, 4) : '—'} />
+                                            <MetricRow label="Runs Test (P-Value)" shepVal={latestStats ? formatNum(latestStats.shepRuns, 4) : '—'} shaVal={latestStats ? formatNum(latestStats.shaRuns, 4) : '—'} />
+                                            <MetricRow label="Absolute Score (Abs)" shepVal={latestStats ? formatNum(latestStats.shepAbs, 4) : '—'} shaVal={latestStats ? formatNum(latestStats.shaAbs, 4) : '—'} />
+                                            <MetricRow label="Final Score (Weighted)" shepVal={latestStats ? formatNum(latestStats.shepFinal, 2) : '—'} shaVal={latestStats ? formatNum(latestStats.shaFinal, 2) : '—'} isFinal />
+                                        </div>
+                                    </div>
+
+                                    <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-zinc-900/30 border border-zinc-800 rounded-2xl px-6 py-4">
+                                        <div className="text-xs md:text-sm font-bold text-zinc-500 uppercase tracking-widest text-center md:text-left">
+                                            [greater performance by set]
+                                        </div>
+                                        <div className="flex items-center gap-6">
+                                            <div className="text-cyan-400 font-mono text-lg md:text-xl">[shep32: {benchStatus.betterTally.shep}]</div>
+                                            <div className="text-zinc-400 font-mono text-lg md:text-xl">[sha256: {benchStatus.betterTally.sha}]</div>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-[#0a0f18] border border-zinc-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col h-[380px]">
+                                        <div className="flex items-center gap-2 px-4 py-2 bg-zinc-900 border-b border-zinc-800 shrink-0">
+                                            <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                                            <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+                                            <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                                            <span className="ml-2 text-xs font-mono text-zinc-500 uppercase">Live Output Array (Last 10 Rounds)</span>
+                                        </div>
+                                        <div className="flex-1 overflow-x-auto overflow-y-hidden p-0 relative">
+                                            <table className="w-full text-[10px] md:text-xs font-mono text-zinc-300 whitespace-nowrap text-right h-full">
+                                                <thead className="text-zinc-500 border-b border-zinc-800 bg-zinc-950 sticky top-0">
+                                                    <tr>
+                                                        <th className="py-2 px-3 text-left">iter</th>
+                                                        <th className="py-2 px-3 text-left">category</th>
+                                                        <th className="py-2 px-3">len</th>
+                                                        <th className="py-2 px-3 text-cyan-500">shepOk</th>
+                                                        <th className="py-2 px-3">shaOk</th>
+                                                        <th className="py-2 px-3 text-cyan-500">shepOnes</th>
+                                                        <th className="py-2 px-3">shaOnes</th>
+                                                        <th className="py-2 px-3 text-cyan-500">shepEnt</th>
+                                                        <th className="py-2 px-3">shaEnt</th>
+                                                        <th className="py-2 px-3 text-cyan-500">shepRuns</th>
+                                                        <th className="py-2 px-3">shaRuns</th>
+                                                        <th className="py-2 px-3 text-cyan-500">shepHam</th>
+                                                        <th className="py-2 px-3">shaHam</th>
+                                                        <th className="py-2 px-3 text-cyan-500">shepPosU</th>
+                                                        <th className="py-2 px-3">shaPosU</th>
+                                                        <th className="py-2 px-3 text-cyan-500">shepGlobU</th>
+                                                        <th className="py-2 px-3">shaGlobU</th>
+                                                        <th className="py-2 px-3 text-cyan-500">shepAbs</th>
+                                                        <th className="py-2 px-3">shaAbs</th>
+                                                        <th className="py-2 px-3 text-cyan-400 font-bold">shepFinal</th>
+                                                        <th className="py-2 px-3 font-bold">shaFinal</th>
+                                                        <th className="py-2 px-3 text-yellow-500 text-center">better</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {visibleHistory.map((r, i) => (
+                                                        <tr key={`row-${i}`} className="hover:bg-zinc-800/30 border-b border-zinc-900/50 h-[30px]">
+                                                            <td className="py-1 px-3 text-left">{r.iter}</td>
+                                                            <td className="py-1 px-3 text-left">{r.cat}</td>
+                                                            <td className="py-1 px-3">{r.len}</td>
+                                                            <td className="py-1 px-3 text-cyan-400">{r.shepOk}</td>
+                                                            <td className="py-1 px-3 text-zinc-400">{r.shaOk}</td>
+                                                            <td className="py-1 px-3 text-cyan-400">{formatNum(r.shepOnes)}</td>
+                                                            <td className="py-1 px-3 text-zinc-400">{formatNum(r.shaOnes)}</td>
+                                                            <td className="py-1 px-3 text-cyan-400">{formatNum(r.shepEnt, 3)}</td>
+                                                            <td className="py-1 px-3 text-zinc-400">{formatNum(r.shaEnt, 3)}</td>
+                                                            <td className="py-1 px-3 text-cyan-400">{formatNum(r.shepRuns, 4)}</td>
+                                                            <td className="py-1 px-3 text-zinc-400">{formatNum(r.shaRuns, 4)}</td>
+                                                            <td className="py-1 px-3 text-cyan-400">{formatNum(r.shepHam)}</td>
+                                                            <td className="py-1 px-3 text-zinc-400">{formatNum(r.shaHam)}</td>
+                                                            <td className="py-1 px-3 text-cyan-400">{formatNum(r.shepPosU)}</td>
+                                                            <td className="py-1 px-3 text-zinc-400">{formatNum(r.shaPosU)}</td>
+                                                            <td className="py-1 px-3 text-cyan-400">{formatNum(r.shepGlobU)}</td>
+                                                            <td className="py-1 px-3 text-zinc-400">{formatNum(r.shaGlobU)}</td>
+                                                            <td className="py-1 px-3 text-cyan-400">{formatNum(r.shepAbs, 4)}</td>
+                                                            <td className="py-1 px-3 text-zinc-400">{formatNum(r.shaAbs, 4)}</td>
+                                                            <td className="py-1 px-3 text-cyan-300 font-bold">{formatNum(r.shepFinal)}</td>
+                                                            <td className="py-1 px-3 text-white font-bold">{formatNum(r.shaFinal)}</td>
+                                                            <td className={`py-1 px-3 text-center font-bold ${r.better === 'SHEP32' ? 'text-cyan-400' : 'text-zinc-300'}`}>
+                                                                {r.better}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                    {[...Array(paddingRows)].map((_, i) => (
+                                                        <tr key={`pad-${i}`} className="border-b border-zinc-900/50 h-[30px]"><td colSpan="22"></td></tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-6 flex flex-col md:flex-row gap-4 items-center justify-between">
+                                        <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
+                                            <button 
+                                                onClick={() => downloadTextFile(benchStatus.shepAllHashes.join('\n'), 'SHEP32_Hash_Audit.txt')}
+                                                disabled={!benchStatus.shepAllHashes.length}
+                                                className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-cyan-400 border border-zinc-800 rounded-lg text-xs font-bold flex items-center justify-center gap-2 disabled:opacity-50 w-full sm:w-auto"
+                                            >
+                                                <Icon n="dl" className="w-3.5 h-3.5" /> DL: SHEP32 HASH AUDIT
+                                            </button>
+                                            <button 
+                                                onClick={() => downloadTextFile(benchStatus.shaAllHashes.join('\n'), 'SHA256_Hash_Audit.txt')}
+                                                disabled={!benchStatus.shaAllHashes.length}
+                                                className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 border border-zinc-800 rounded-lg text-xs font-bold flex items-center justify-center gap-2 disabled:opacity-50 w-full sm:w-auto"
+                                            >
+                                                <Icon n="dl" className="w-3.5 h-3.5" /> DL: SHA256 HASH AUDIT
+                                            </button>
+                                        </div>
+                                        <button 
+                                            onClick={downloadCSV}
+                                            disabled={!benchStatus.history.length}
+                                            className="px-6 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg w-full md:w-auto"
+                                        >
+                                            <Icon n="dl" className="w-3.5 h-3.5" /> DL: STATS PER ROUND (CSV)
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                         </main>
                     </div>
 
-                    {/* Responsive Footer */}
                     <footer className="w-full max-w-6xl mt-16 border-t border-zinc-900 pt-8 flex flex-col items-center justify-center gap-6 text-zinc-600 pb-4">
                         <div className="text-center">
                             <p className="text-[10px] font-mono">
@@ -1663,7 +1887,7 @@
                             <a href="https://orcid.org/0000-0002-0051-5851" target="_blank" rel="noopener noreferrer" className="hover:text-cyan-500 transition-colors">ORCID</a>
                             <span className="text-zinc-800">|</span>
                             <a href="https://github.com/andylehti/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 hover:text-cyan-500 transition-colors">
-                                <Github className="w-3 h-3" /> GitHub
+                                <Icon n="github" className="w-3 h-3" /> GitHub
                             </a>
                         </div>
                     </footer>

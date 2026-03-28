@@ -1,13 +1,24 @@
 # =========================
 # CLI imports and user-facing workflow
-# Build Version: 60D
+# CLI Build Version: 2.0.2
 # NOTES: Argument parsing, key-file handling, file payload wrappers, range generation, signing helpers, and interactive command routing.
 # =========================
 
-import argparse, difflib
+import argparse, difflib, hashlib, json, os, sys, time
 from pathlib import Path
 
-CLI_VERSION = "2.0.0"
+try:
+    from .core import *
+    from .core import _printProg
+except Exception:
+    try:
+        from shep32.core import *
+        from shep32.core import _printProg
+    except Exception:
+        from core import *
+        from core import _printProg
+
+CLI_VERSION = "2.0.2"
 
 DOC_EXTS = {".pdf", ".doc", ".docx", ".txt", ".rtf", ".odt", ".md", ".csv", ".xls", ".xlsx", ".json", ".tsv", ".bin"}
 KEY_HEADER = "-----BEGIN SHEP KEY-----\n"
@@ -53,7 +64,8 @@ def parseKeyFileText(text):
         (KEY_HEADER.strip(), KEY_FOOTER.strip()),
         ("-----BEGIN SHEP KEY-----", "-----END SHEP KEY-----"),
         ("-----BEGIN SHEP64 KEY-----", "-----END SHEP64 KEY-----"),
-        ("-----BEGIN SHEP72 KEY-----", "-----END SHEP72 KEY-----"),
+        ("-----BEGIN SHEP333 KEY-----", "-----END SHEP333 KEY-----"),
+        ("-----BEGIN SHEP333 KEY-----", "-----END SHEP333 KEY-----"),
     ]
     for head, foot in wrappers:
         if head in t and foot in t:
@@ -157,22 +169,78 @@ def maybeLoadToken(value):
         pass
     return s
 
-def resolveKeyFromArgs(args, require=False):
+
+class CliFmt(argparse.RawTextHelpFormatter, argparse.ArgumentDefaultsHelpFormatter):
+    pass
+
+def normalizeMode(raw, allowNone=False, default=0):
+    if raw is None:
+        return None if allowNone else int(default)
+    raw = int(raw)
+    if raw not in (0, 1):
+        raise ValueError("--mode must be 0 or 1")
+    return raw
+
+def detectExplicitKeyMode(token, count=8):
+    t = sanitizeKeyToken(token)
+    if isHex64(t):
+        return 0
+    if isExtendedKey(t, count):
+        return 1
+    return None
+
+def resolveKeyInput(args, require=False, allowModeAuto=False):
     provided = 0
-    if getattr(args, "key", None): provided += 1
-    if getattr(args, "passphrase", None) is not None: provided += 1
+    if getattr(args, "key", None) is not None: provided += 1
+    if getattr(args, "phrase", None) is not None: provided += 1
     if getattr(args, "keyfile", None): provided += 1
     if provided > 1:
-        raise ValueError("Provide only one of: --key, --passphrase, --keyfile")
+        raise ValueError("Provide only one of: --key, --phrase, --keyfile")
+    modeArg = normalizeMode(getattr(args, "mode", None), allowNone=allowModeAuto, default=0)
     if getattr(args, "keyfile", None):
-        return loadKeyFromFile(args.keyfile)
-    if getattr(args, "passphrase", None) is not None:
-        return args.passphrase
+        token = loadKeyFromFile(args.keyfile)
+        det = detectExplicitKeyMode(token, FIXED_COUNT)
+        if det is None:
+            raise ValueError("Key file must contain an explicit SHEP32 or SHEP333 key.")
+        if modeArg is not None and modeArg != det:
+            raise ValueError(f"--mode {modeArg} does not match the key in {args.keyfile}.")
+        return token, det
     if getattr(args, "key", None) is not None:
-        return sanitizeKeyToken(args.key)
+        token = sanitizeKeyToken(args.key)
+        det = detectExplicitKeyMode(token, FIXED_COUNT)
+        if det is None:
+            raise ValueError("--key expects an explicit SHEP32 or SHEP333 key. Use --phrase for phrases.")
+        if modeArg is not None and modeArg != det:
+            raise ValueError(f"--mode {modeArg} does not match the explicit key provided with --key.")
+        return token, det
+    if getattr(args, "phrase", None) is not None:
+        return args.phrase, (0 if modeArg is None else modeArg)
     if require:
-        raise ValueError("A key source is required.")
-    return None
+        raise ValueError("A key source is required. Use --key, --phrase, or --keyfile.")
+    return None, (0 if modeArg is None else modeArg)
+
+def modeLabel(mode):
+    return "SHEP32" if int(mode) == 0 else "SHEP333"
+
+def keyInputHelp():
+    return (
+        "Key input rules:\n"
+        "  --key      explicit SHEP32 or SHEP333 key only\n"
+        "  --phrase   explicit phrase, even if it looks like a key\n"
+        "  --keyfile  file containing an explicit SHEP32 or SHEP333 key\n"
+        "\n"
+        "Mode rules:\n"
+        "  --mode 0   SHEP32 / 32-byte / 64-hex mode\n"
+        "  --mode 1   SHEP333 extended mode\n"
+        "\n"
+        "Examples:\n"
+        "  shep32 enc --text \"secret\" --key \"9ab70f...07dd\"\n"
+        "  shep32 enc --text \"secret\" --key \"<shep333-key>\" --mode 1\n"
+        "  shep32 enc --text \"secret\" --phrase \"1234\" --mode 1\n"
+        "  shep32 dec --text \"<token>\" --key \"9ab70f...07dd\"\n"
+        "  shep32 dec --text \"<token>\" --phrase \"1234\" --mode 1"
+    )
+
 
 def emitJson(obj):
     print(json.dumps(obj, ensure_ascii=False))
@@ -433,17 +501,20 @@ def meanFlipRate(hexA, hexB):
 def benchSpeed(inputs, mode=0, count=8, directBits=256, laneBits=336, blockBytes=4096, showProgress=True, label="Benchmarking"):
     started = time.perf_counter()
     last = ""
+    hashList = []
     total = len(inputs)
     for i, x in enumerate(inputs, 1):
         last = generateKey(x, mode, count, directBits, laneBits, blockBytes)
+        hashList.append(last)
         if showProgress:
             _printProg(label, i, total)
     elapsed = time.perf_counter() - started
     rate = (float(total) / elapsed) if elapsed > 0 else 0.0
-    return {"hashes": total, "elapsed": elapsed, "hashesPerSec": rate, "last": last}
+    return {"hashes": total, "elapsed": elapsed, "hashesPerSec": rate, "last": last, "hashList": hashList}
 
-def benchCompare(inputs, mode=0, count=8, directBits=256, laneBits=336, blockBytes=4096, inputBits=256, showProgress=True, label="Diffusion report"):
-    total = len(inputs) * (int(inputBits) + 1) * 2
+def benchCompare(inputs, mode=0, count=8, directBits=256, laneBits=336, blockBytes=4096, inputBits=256, compareBits=None, showProgress=True, label="Diffusion report"):
+    testedBits = parseCompareBits(compareBits, inputBits)
+    total = len(inputs) * (int(testedBits) + 1) * 2
     done = 0
     shepBase = []
     shaBase = []
@@ -457,8 +528,8 @@ def benchCompare(inputs, mode=0, count=8, directBits=256, laneBits=336, blockByt
         if showProgress: _printProg(label, done, total)
     shepFlip = 0.0
     shaFlip = 0.0
-    cells = len(inputs) * int(inputBits)
-    for bit in range(int(inputBits)):
+    cells = len(inputs) * int(testedBits)
+    for bit in range(int(testedBits)):
         mask = 1 << bit
         for i, x in enumerate(inputs):
             shepFlip += meanFlipRate(shepBase[i], generateKey(x ^ mask, mode, count, directBits, laneBits, blockBytes))
@@ -471,6 +542,7 @@ def benchCompare(inputs, mode=0, count=8, directBits=256, laneBits=336, blockByt
     return {
         "samples": len(inputs),
         "inputBits": int(inputBits),
+        "testedBits": int(testedBits),
         "shepMeanFlipRate": (shepFlip / cells) if cells else 0.0,
         "sha256MeanFlipRate": (shaFlip / cells) if cells else 0.0,
     }
@@ -480,14 +552,49 @@ def saveBenchReport(path, rows):
         for k, v in rows:
             fp.write(f"{k}\t{v}\n")
 
+def parseCompareBits(raw, inputBits):
+    if raw is None:
+        return int(inputBits)
+    s = str(raw).strip().lower()
+    if s == "all":
+        return int(inputBits)
+    try:
+        n = int(s)
+    except Exception:
+        raise ValueError("--bits must be an integer or 'all'")
+    if n < 1:
+        raise ValueError("--bits must be >= 1")
+    return min(int(inputBits), n)
 
-def benchRange(start=None, hashes=0, mode=0, count=8, directBits=256, laneBits=336, blockBytes=4096, randomInputs=True, inputBits=256, compare=False, out=None, showProgress=True):
+def defaultBenchHashesPath(hashes, mode=0, start=None, randomInputs=True, inputBits=256, compare=False, compareBits=None):
+    parts = [f"hashes_h{int(hashes)}", f"m{int(mode)}"]
+    if randomInputs:
+        parts.append(f"rand{int(inputBits)}")
+    else:
+        parts.append(f"start{int(start) if start is not None else 0}")
+    if compare:
+        parts.append("cmp")
+        parts.append(f"bits{compareBits if compareBits is not None else int(inputBits)}")
+    return "_".join(parts) + ".txt"
+
+def saveBenchHashes(path, inputs, hashes):
+    with open(path, "w", encoding="utf-8", newline="\n") as fp:
+        for x, h in zip(inputs, hashes):
+            fp.write(f"{int(x)} = {h}\n")
+
+
+
+def benchRange(start=None, hashes=0, mode=0, count=8, directBits=256, laneBits=336, blockBytes=4096, randomInputs=True, inputBits=256, compare=False, compareBits=None, out=None, hashesOut=None, showProgress=True):
     inputs = makeBenchInputs(hashes, start=start, inputBits=inputBits, randomInputs=randomInputs)
     speed = benchSpeed(inputs, mode, count, directBits, laneBits, blockBytes, showProgress, "Benchmarking")
     rows = [("hashes", speed["hashes"]), ("elapsed", f"{speed['elapsed']:.6f}"), ("hashesPerSec", f"{speed['hashesPerSec']:.6f}"), ("last", speed["last"]), ("randomInputs", str(bool(randomInputs)).lower()), ("inputBits", int(inputBits))]
     if compare:
-        comp = benchCompare(inputs, mode, count, directBits, laneBits, blockBytes, inputBits, showProgress, "Diffusion report")
-        rows.extend([("shepMeanFlipRate", f"{comp['shepMeanFlipRate']:.10f}"), ("sha256MeanFlipRate", f"{comp['sha256MeanFlipRate']:.10f}")])
+        comp = benchCompare(inputs, mode, count, directBits, laneBits, blockBytes, inputBits, compareBits, showProgress, "Diffusion report")
+        rows.extend([("testedBits", int(comp["testedBits"])), ("shepMeanFlipRate", f"{comp['shepMeanFlipRate']:.10f}"), ("sha256MeanFlipRate", f"{comp['sha256MeanFlipRate']:.10f}")])
+    if hashesOut is None:
+        hashesOut = defaultBenchHashesPath(hashes, mode, start, randomInputs, inputBits, compare, parseCompareBits(compareBits, inputBits) if compare else None)
+    saveBenchHashes(hashesOut, inputs, speed["hashList"])
+    rows.append(("hashesOut", hashesOut))
     if out:
         saveBenchReport(out, rows)
         print(out)
@@ -499,15 +606,15 @@ def _fileHash(path, mode=0, count=8, directBits=256, laneBits=336, blockBytes=65
     return generateKeyFile(path, mode, count, directBits, laneBits, blockBytes)
 
 def cmdKey(args):
-    mode = 0 if int(args.mode) == 0 else 1
+    mode = normalizeMode(args.mode, default=0)
     if args.file:
         k = _fileHash(args.file, mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
     elif args.value is not None:
         k = generateKey(int(args.value), mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
     elif args.text is not None:
         k = generateKey(args.text, mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
-    elif args.passphrase is not None:
-        k = generateKey(args.passphrase, mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
+    elif args.phrase is not None:
+        k = generateKey(args.phrase, mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
     else:
         k = generateKey(None, mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
     if args.save:
@@ -521,7 +628,7 @@ def cmdKey(args):
     return 0
 
 def cmdHash(args):
-    mode = 0 if int(args.mode) == 0 else 1
+    mode = normalizeMode(args.mode, default=0)
     if args.file:
         out = _fileHash(args.file, mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
     elif args.value is not None:
@@ -546,11 +653,12 @@ def cmdRange(args):
 
 def cmdBench(args):
     randomInputs = True if args.random_inputs is None and args.start is None else bool(args.random_inputs)
-    benchRange(args.start, args.hashes, args.mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes, randomInputs, args.input_bits, args.compare, args.out, not args.no_progress)
+    benchRange(args.start, args.hashes, args.mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes, randomInputs, args.input_bits, args.compare, args.bits, args.out, args.hashes_out, not args.no_progress)
     return 0
 
 def cmdPair(args):
-    keyMode = 0 if int(args.mode) == 0 else 333
+    mode = normalizeMode(args.mode, default=0)
+    keyMode = 0 if mode == 0 else 333
     if args.file:
         master = _fileHash(args.file, 0 if keyMode == 0 else 1, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
     elif args.value is not None:
@@ -566,8 +674,8 @@ def cmdPair(args):
     return 0
 
 def cmdPubKey(args):
-    keyMode = 0 if int(args.mode) == 0 else 333
-    k = resolveKeyFromArgs(args, require=True)
+    k, mode = resolveKeyInput(args, require=True, allowModeAuto=False)
+    keyMode = 0 if mode == 0 else 333
     pub = generatePublicKey(k, keyMode, FIXED_COUNT)
     if args.json:
         emitJson({"ok": True, "mode": "pubkey", "publicKey": pub})
@@ -576,8 +684,8 @@ def cmdPubKey(args):
     return 0
 
 def cmdSign(args):
-    keyMode = 0 if int(args.mode) == 0 else 333
-    k = resolveKeyFromArgs(args, require=True)
+    k, mode = resolveKeyInput(args, require=True, allowModeAuto=False)
+    keyMode = 0 if mode == 0 else 333
     payload = readTextFile(args.file) if args.file else (readStdinPayload(args.delim) if args.stdin else args.text)
     sig = signData(payload, k, keyMode, FIXED_COUNT)
     if args.json:
@@ -599,8 +707,8 @@ def cmdVerify(args):
     return 0
 
 def cmdEnc(args):
-    keyMode = 0 if int(args.mode) == 0 else 333
-    k = resolveKeyFromArgs(args, require=False)
+    k, mode = resolveKeyInput(args, require=False, allowModeAuto=False)
+    keyMode = 0 if mode == 0 else 333
     chunkBytes = resolveChunkBytes(args.chunk_size, getattr(args, "chunk_bytes", None))
     progress = None if args.json or getattr(args, "no_progress", False) else makeProgress("Encrypting")
 
@@ -610,11 +718,11 @@ def cmdEnc(args):
             raise FileNotFoundError(fp)
         validateFileCap(fp, args.no_limit)
         payload = packFilePayload(fp, readBinFile(fp))
-        encObj, used = encryptData(payload, k, keyMode=0 if keyMode == 0 else 1, count=FIXED_COUNT, detached=args.detached, compress=not args.no_compress, chunkSize=chunkBytes, powBits=args.pow_bits, powStart=args.pow_start, progress=progress)
+        encObj, used = encryptData(payload, k, keyMode=0 if mode == 0 else 1, count=FIXED_COUNT, detached=args.detached, compress=not args.no_compress, chunkSize=chunkBytes, powBits=args.pow_bits, powStart=args.pow_start, progress=progress)
         srcLabel = fp
     else:
         pt = readStdinPayload(args.delim) if args.stdin else args.text
-        encObj, used = encryptData(pt, k, keyMode=0 if keyMode == 0 else 1, count=FIXED_COUNT, detached=args.detached, compress=not args.no_compress, chunkSize=chunkBytes, powBits=args.pow_bits, powStart=args.pow_start, progress=progress)
+        encObj, used = encryptData(pt, k, keyMode=0 if mode == 0 else 1, count=FIXED_COUNT, detached=args.detached, compress=not args.no_compress, chunkSize=chunkBytes, powBits=args.pow_bits, powStart=args.pow_start, progress=progress)
         srcLabel = "cipher"
 
     autoKeyOut = None
@@ -675,8 +783,8 @@ def cmdEnc(args):
     return 0
 
 def cmdDec(args):
-    keyMode = None if args.mode is None else (0 if int(args.mode) == 0 else 1)
-    k = resolveKeyFromArgs(args, require=True)
+    k, mode = resolveKeyInput(args, require=True, allowModeAuto=True)
+    keyMode = None if mode is None else (0 if mode == 0 else 1)
     progress = None if args.json or getattr(args, "no_progress", False) else makeProgress("Decrypting")
 
     if args.body is not None or args.meta is not None:
@@ -724,7 +832,7 @@ def cmdDec(args):
     return 0
 
 def promptMode(default=0):
-    s = input(f"Mode 0=primary, 1=extended [default {default}]: ").strip()
+    s = input(f"Mode 0=SHEP32, 1=SHEP333 [default {default}]: ").strip()
     return default if s == "" else (0 if int(s) == 0 else 1)
 
 def promptCount(default=8):
@@ -736,12 +844,12 @@ def promptChunkUnits(default=1):
     return resolveChunkBytes(units)
 
 def promptKeySource(require=False):
-    print("Key source: 1) direct key  2) passphrase  3) key file  4) auto")
+    print("Key source: 1) explicit key  2) phrase  3) key file  4) auto")
     choice = input("> ").strip()
     if choice == "1":
         return sanitizeKeyToken(input("Key: "))
     if choice == "2":
-        return input("Passphrase: ")
+        return input("Phrase: ")
     if choice == "3":
         kp = wizardPickExistingPath(input("Key file path: "), label="Key file")
         return loadKeyFromFile(kp) if kp else None
@@ -762,10 +870,10 @@ def interactiveWizard():
         print("7) Verify")
         print("8) Range")
         print("9) Benchmark")
-        print("10) Exit")
+        print("0) Exit")
         choice = input("> ").strip()
         try:
-            if choice in {"10", "q", "quit", "exit"}:
+            if choice in {"0", "q", "quit", "exit"}:
                 return 0
             if choice == "4":
                 mode = promptMode(0)
@@ -876,7 +984,7 @@ def interactiveWizard():
                             print(used)
                 continue
             if choice == "3":
-                modeText = input("Mode 0=SHEP64, 1=SHEP72, blank=auto: ").strip()
+                modeText = input("Mode 0=SHEP32, 1=SHEP333, blank=auto: ").strip()
                 mode = None if modeText == "" else (0 if int(modeText) == 0 else 1)
                 count = FIXED_COUNT
                 advanced = input("Advanced options? [y/N]: ").strip().lower() in {"y", "yes"}
@@ -975,13 +1083,30 @@ def interactiveWizard():
     return 0
 
 def buildParser():
-    parser = argparse.ArgumentParser(prog="shep", description="SHEP CLI — SHEP64 primary keys and SHEP72 extended keys", formatter_class=argparse.RawTextHelpFormatter)
+    parser = argparse.ArgumentParser(
+        prog="shep32",
+        description="SHEP CLI — SHEP32 primary keys and SHEP333 extended keys",
+        epilog=(
+            "Common examples:\n"
+            "  shep32 key\n"
+            "  shep32 hash --text \"hello\"\n"
+            "  shep32 hash --mode 1 --text \"hello\"\n"
+            "  shep32 enc --text \"secret\" --key \"<shep32-key>\"\n"
+            "  shep32 enc --text \"secret\" --key \"<shep333-key>\" --mode 1\n"
+            "  shep32 enc --text \"secret\" --phrase \"1234\" --mode 1\n"
+            "  shep32 dec --text \"<token>\" --key \"<shep32-key>\"\n"
+            "  shep32 dec --text \"<token>\" --phrase \"1234\" --mode 1\n"
+            "  shep32 pubkey --key \"<shep333-key>\" --mode 1\n"
+            "  shep32 sign --text \"message\" --phrase \"1234\" --mode 1"
+        ),
+        formatter_class=CliFmt,
+    )
     parser.add_argument("--version", action="version", version=f"%(prog)s {CLI_VERSION}")
     sub = parser.add_subparsers(dest="cmd")
     sub.add_parser("start", help="Open the interactive menu")
 
-    def addModeArgs(p):
-        p.add_argument("--mode", type=int, default=0, help="0 = SHEP64 primary, 1 = SHEP72 extended")
+    def addModeArgs(p, default=0, allowAuto=False):
+        p.add_argument("--mode", type=int, default=(None if allowAuto else default), help="0 = SHEP32 primary (32 bytes / 64 hex), 1 = SHEP333 extended")
         p.add_argument("--direct-bits", dest="direct_bits", type=int, default=256)
         p.add_argument("--lane-bits", dest="lane_bits", type=int, default=336)
         p.add_argument("--block-bytes", dest="block_bytes", type=int, default=4096)
@@ -990,17 +1115,25 @@ def buildParser():
         p.add_argument("--chunk-size", dest="chunk_size", type=int, default=1, help=f"Chunk units of {CHUNK_UNIT} bytes (default 1)")
         p.add_argument("--chunk-bytes", dest="chunk_bytes", type=int, default=None, help="Exact chunk size in bytes")
 
-    pk = sub.add_parser("key", help="Generate a fresh random key or derive one from text, integer, file, or passphrase input")
+    def addKeyInputArgs(p, require=False, allowAutoMode=False):
+        kg = p.add_mutually_exclusive_group(required=require)
+        kg.add_argument("--key", default=None, help="Explicit SHEP32 or SHEP333 key")
+        kg.add_argument("--phrase", "-p", default=None, help="Explicit phrase, even if it looks like a key")
+        kg.add_argument("--keyfile", default=None, help="File containing an explicit SHEP32 or SHEP333 key")
+        addModeArgs(p, default=0, allowAuto=allowAutoMode)
+        p.epilog = keyInputHelp()
+
+    pk = sub.add_parser("key", help="Generate a fresh random key or derive one from text, integer, file, or phrase input", formatter_class=CliFmt)
     g = pk.add_mutually_exclusive_group(required=False)
     g.add_argument("--text", default=None)
     g.add_argument("--value", default=None)
     g.add_argument("--file", default=None)
-    g.add_argument("-p", "--passphrase", default=None)
+    g.add_argument("--phrase", "-p", default=None)
     addModeArgs(pk)
     pk.add_argument("--save", default=None)
     pk.add_argument("--json", action="store_true")
 
-    ph = sub.add_parser("hash", help="Deterministically derive a SHEP64 or SHEP72 key from text, integer, or file input")
+    ph = sub.add_parser("hash", help="Deterministically derive a SHEP32 or SHEP333 key from text, integer, or file input", formatter_class=CliFmt)
     g = ph.add_mutually_exclusive_group(required=True)
     g.add_argument("--text", default=None)
     g.add_argument("--value", default=None)
@@ -1008,7 +1141,7 @@ def buildParser():
     addModeArgs(ph)
     ph.add_argument("--json", action="store_true")
 
-    pr = sub.add_parser("range", help="Generate a range of SHEP64 or SHEP72 keys from a starting integer")
+    pr = sub.add_parser("range", help="Generate a range of SHEP32 or SHEP333 keys from a starting integer", formatter_class=CliFmt)
     pr.add_argument("--start", type=int, required=True)
     pr.add_argument("--hashes", type=int, required=True)
     addModeArgs(pr)
@@ -1016,18 +1149,20 @@ def buildParser():
     pr.add_argument("--bare", action="store_true")
     pr.add_argument("--progress", action="store_true")
 
-    pb = sub.add_parser("bench", help="Benchmark key generation speed and optional diffusion report")
+    pb = sub.add_parser("bench", help="Benchmark key generation speed, save individual hashes, and optionally run a diffusion report", formatter_class=CliFmt)
     pb.add_argument("--start", type=int, default=None)
     pb.add_argument("--hashes", type=int, required=True)
     pb.add_argument("--random-inputs", dest="random_inputs", action="store_true", default=None)
     pb.add_argument("--sequential", dest="random_inputs", action="store_false")
     pb.add_argument("--input-bits", dest="input_bits", type=int, default=256)
     pb.add_argument("--compare", action="store_true")
+    pb.add_argument("--bits", default=None, help="Compare this many bit positions, or 'all'")
     pb.add_argument("--out", default=None)
+    pb.add_argument("--hashes-out", dest="hashes_out", default=None, help="Write individual input/hash pairs here; defaults to hashes{parameters}.txt")
     pb.add_argument("--no-progress", dest="no_progress", action="store_true")
     addModeArgs(pb)
 
-    pp = sub.add_parser("pair", help="Show the two internal 256-bit encryption keys derived from a key or source")
+    pp = sub.add_parser("pair", help="Show the two internal 256-bit encryption keys derived from a key or source", formatter_class=CliFmt)
     g = pp.add_mutually_exclusive_group(required=True)
     g.add_argument("--text", default=None)
     g.add_argument("--value", default=None)
@@ -1035,18 +1170,14 @@ def buildParser():
     addModeArgs(pp)
     pp.add_argument("--json", action="store_true")
 
-    pe = sub.add_parser("enc", help="Encrypt text or a file into a .sh32 token")
+    pe = sub.add_parser("enc", help="Encrypt text or a file into a .sh32 token", formatter_class=CliFmt)
     g = pe.add_mutually_exclusive_group(required=True)
     g.add_argument("-f", "--file", dest="file", default=None)
     g.add_argument("--text", dest="text", default=None)
     g.add_argument("-e", dest="text", default=None)
     g.add_argument("--stdin", action="store_true")
     pe.add_argument("--delim", default=None)
-    kg = pe.add_mutually_exclusive_group(required=False)
-    kg.add_argument("--key", default=None)
-    kg.add_argument("-p", "--passphrase", default=None)
-    kg.add_argument("--keyfile", default=None)
-    pe.add_argument("--mode", type=int, default=0, help="0 = SHEP64 primary, 1 = SHEP72 extended")
+    addKeyInputArgs(pe, require=False, allowAutoMode=False)
     pe.add_argument("--detached", action="store_true")
     pe.add_argument("--no-compress", dest="no_compress", action="store_true")
     addChunkArgs(pe)
@@ -1059,7 +1190,7 @@ def buildParser():
     pe.add_argument("--no-progress", dest="no_progress", action="store_true")
     pe.add_argument("--json", action="store_true")
 
-    pd = sub.add_parser("dec", help="Decrypt a .sh32 token, detached body/meta tokens, or a token file")
+    pd = sub.add_parser("dec", help="Decrypt a .sh32 token, detached body/meta tokens, or a token file", formatter_class=CliFmt)
     g = pd.add_mutually_exclusive_group(required=False)
     g.add_argument("-f", "--file", dest="file", default=None)
     g.add_argument("--text", dest="text", default=None)
@@ -1068,38 +1199,26 @@ def buildParser():
     pd.add_argument("--body", default=None)
     pd.add_argument("--meta", default=None)
     pd.add_argument("--delim", default=None)
-    kg = pd.add_mutually_exclusive_group(required=True)
-    kg.add_argument("--key", default=None)
-    kg.add_argument("-p", "--passphrase", default=None)
-    kg.add_argument("--keyfile", default=None)
-    pd.add_argument("--mode", type=int, default=None, help="0 = SHEP64 primary, 1 = SHEP72 extended, blank = auto-detect")
+    addKeyInputArgs(pd, require=True, allowAutoMode=True)
     pd.add_argument("-o", "--out", default=None)
     pd.add_argument("--as-text", dest="as_text", action="store_true")
     pd.add_argument("--no-progress", dest="no_progress", action="store_true")
     pd.add_argument("--json", action="store_true")
 
-    pg = sub.add_parser("pubkey", help="Derive an Ed25519 public key from a SHEP key source")
-    kg = pg.add_mutually_exclusive_group(required=True)
-    kg.add_argument("--key", default=None)
-    kg.add_argument("-p", "--passphrase", default=None)
-    kg.add_argument("--keyfile", default=None)
-    pg.add_argument("--mode", type=int, default=0, help="0 = SHEP64 primary, 1 = SHEP72 extended")
+    pg = sub.add_parser("pubkey", help="Derive an Ed25519 public key from a SHEP key source", formatter_class=CliFmt)
+    addKeyInputArgs(pg, require=True, allowAutoMode=False)
     pg.add_argument("--json", action="store_true")
 
-    ps = sub.add_parser("sign", help="Sign text or file contents with the Ed25519 key derived from a SHEP key source")
+    ps = sub.add_parser("sign", help="Sign text or file contents with the Ed25519 key derived from a SHEP key source", formatter_class=CliFmt)
     g = ps.add_mutually_exclusive_group(required=True)
     g.add_argument("--text", default=None)
     g.add_argument("-f", "--file", dest="file", default=None)
     g.add_argument("--stdin", action="store_true")
     ps.add_argument("--delim", default=None)
-    kg = ps.add_mutually_exclusive_group(required=True)
-    kg.add_argument("--key", default=None)
-    kg.add_argument("-p", "--passphrase", default=None)
-    kg.add_argument("--keyfile", default=None)
-    ps.add_argument("--mode", type=int, default=0, help="0 = SHEP64 primary, 1 = SHEP72 extended")
+    addKeyInputArgs(ps, require=True, allowAutoMode=False)
     ps.add_argument("--json", action="store_true")
 
-    pv = sub.add_parser("verify", help="Verify text or file contents with a signature and public key")
+    pv = sub.add_parser("verify", help="Verify text or file contents with a signature and public key", formatter_class=CliFmt)
     g = pv.add_mutually_exclusive_group(required=True)
     g.add_argument("--text", default=None)
     g.add_argument("-f", "--file", dest="file", default=None)

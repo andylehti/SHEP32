@@ -1497,9 +1497,9 @@ void printHelp(const char* exe) {
          << "  " << exe << " --decrypt-file PATH --key KEY [options]\n"
          << "  " << exe << " --body BODY --meta META --key KEY [options]\n\n"
          << "Hash inputs:\n"
-         << "  --text TEXT         Generate a SHEP64 or SHEP72 key from UTF-8 text\n"
-         << "  --value INT         Generate a SHEP64 or SHEP72 key from a decimal integer\n"
-         << "  --file PATH         Generate a SHEP64 or SHEP72 key from file contents\n"
+         << "  --text TEXT         Generate a SHEP64 or SHEP333 key from UTF-8 text\n"
+         << "  --value INT         Generate a SHEP64 or SHEP333 key from a decimal integer\n"
+         << "  --file PATH         Generate a SHEP64 or SHEP333 key from file contents\n"
          << "  --start INT         Starting integer for range generation\n"
          << "  --hashes N          Number of keys to generate from --start\n"
          << "  --out PATH          Write range or cipher output to file\n\n"
@@ -1531,7 +1531,7 @@ void printHelp(const char* exe) {
          << "  --verify TEXT       Verify UTF-8 text using --signature and --public-key\n"
          << "  --pair              Print the internal encryption key pair\n\n"
          << "General options:\n"
-         << "  --mode N            0 = SHEP64 primary, 1 = SHEP72 extended\n"
+         << "  --mode N            0 = SHEP64 primary, 1 = SHEP333 extended\n"
          << "  --direct-bits N     Direct-route threshold bits (default 256)\n"
          << "  --lane-bits N       Reserved compatibility option (default 336)\n"
          << "  --block-bytes N     Reserved compatibility option (default 4096 or 65536 for files)\n"
@@ -1733,7 +1733,7 @@ int interactiveMenu() {
         try {
             if (choice == "0" || choice == "10" || choice == "q" || choice == "quit" || choice == "exit") return 0;
             if (choice == "1") {
-                int mode = askInt("Mode 0=SHEP64, 1=SHEP72 [default 0]: ", 0);
+                int mode = askInt("Mode 0=SHEP64, 1=SHEP333 [default 0]: ", 0);
                 int count = FIXED_COUNT;
                 string kind = trimStr(askLine("Input type: 1) text  2) file [default 1]: "));
                 if (kind == "2") cout << generateKeyFile(trimStr(askLine("File path: ")), mode, count) << '\n';
@@ -1741,7 +1741,7 @@ int interactiveMenu() {
                 continue;
             }
             if (choice == "2") {
-                int mode = askInt("Mode 0=SHEP64, 1=SHEP72 [default 0]: ", 0);
+                int mode = askInt("Mode 0=SHEP64, 1=SHEP333 [default 0]: ", 0);
                 int count = FIXED_COUNT;
                 bool advanced = askYesNo("Advanced options? [y/N]: ", false);
                 bool detached = false, noCompress = false;
@@ -1822,7 +1822,7 @@ int interactiveMenu() {
                 continue;
             }
             if (choice == "3") {
-                string modeText = trimStr(askLine("Mode 0=SHEP64, 1=SHEP72, blank=auto: "));
+                string modeText = trimStr(askLine("Mode 0=SHEP64, 1=SHEP333, blank=auto: "));
                 int mode = modeText.empty() ? -1 : (stoi(modeText) == 0 ? 0 : 333);
                 int count = askDecryptCountOverride(mode);
                 bool advanced = askYesNo("Advanced options? [y/N]: ", false);
@@ -1874,7 +1874,7 @@ int interactiveMenu() {
                 continue;
             }
             if (choice == "4") {
-                int mode = askInt("Mode 0=SHEP64, 1=SHEP72 [default 0]: ", 0);
+                int mode = askInt("Mode 0=SHEP64, 1=SHEP333 [default 0]: ", 0);
                 int count = FIXED_COUNT;
                 string kind = trimStr(askLine("Generate source: 1) random  2) text  3) file [default 1]: "));
                 string out;
@@ -1886,12 +1886,12 @@ int interactiveMenu() {
                 if (!save.empty()) { writeKeyFilePath(save, out); cout << save << '\n'; }
                 continue;
             }
-            if (choice == "5") { int mode = askInt("Mode 0=SHEP64, 1=SHEP72 [default 0]: ", 0); int count = FIXED_COUNT; string keyIn = askKeySource(true, false); cout << generatePublicKey(keyIn, mode == 0 ? 0 : 333, count) << '\n'; continue; }
-            if (choice == "6") { int mode = askInt("Mode 0=SHEP64, 1=SHEP72 [default 0]: ", 0); int count = FIXED_COUNT; string keyIn = askKeySource(true, false); string text = askLine("Text to sign: "); SignResult sig = signData(text, keyIn, mode == 0 ? 0 : 333, count); cout << "signature=" << sig.signature << '\n' << "publicKey=" << sig.publicKey << '\n'; continue; }
+            if (choice == "5") { int mode = askInt("Mode 0=SHEP64, 1=SHEP333 [default 0]: ", 0); int count = FIXED_COUNT; string keyIn = askKeySource(true, false); cout << generatePublicKey(keyIn, mode == 0 ? 0 : 333, count) << '\n'; continue; }
+            if (choice == "6") { int mode = askInt("Mode 0=SHEP64, 1=SHEP333 [default 0]: ", 0); int count = FIXED_COUNT; string keyIn = askKeySource(true, false); string text = askLine("Text to sign: "); SignResult sig = signData(text, keyIn, mode == 0 ? 0 : 333, count); cout << "signature=" << sig.signature << '\n' << "publicKey=" << sig.publicKey << '\n'; continue; }
             if (choice == "7") { string text = askLine("Text to verify: "); string sig = maybeLoadTokenText(askLine("Signature token or file path: ")); string pub = maybeLoadTokenText(askLine("Public key token or file path: ")); cout << (verifySignature(text, sig, pub) ? "true" : "false") << '\n'; continue; }
-            if (choice == "8") { int mode = askInt("Mode 0=SHEP64, 1=SHEP72 [default 0]: ", 0); int count = FIXED_COUNT; cpp_int start = parseDec(trimStr(askLine("Start integer: "))); uint64_t hashes = parseU64(trimStr(askLine("How many hashes: ")), "hashes"); bool bare = askYesNo("Bare hashes only? [y/N]: ", false); auto lines = generateHashRange(start, hashes, mode, count, 256, 336, 4096, bare, false, "HASH"); for (const auto& line : lines) cout << line << '\n'; continue; }
+            if (choice == "8") { int mode = askInt("Mode 0=SHEP64, 1=SHEP333 [default 0]: ", 0); int count = FIXED_COUNT; cpp_int start = parseDec(trimStr(askLine("Start integer: "))); uint64_t hashes = parseU64(trimStr(askLine("How many hashes: ")), "hashes"); bool bare = askYesNo("Bare hashes only? [y/N]: ", false); auto lines = generateHashRange(start, hashes, mode, count, 256, 336, 4096, bare, false, "HASH"); for (const auto& line : lines) cout << line << '\n'; continue; }
             if (choice == "9") {
-                int mode = askInt("Mode 0=SHEP64, 1=SHEP72 [default 0]: ", 0);
+                int mode = askInt("Mode 0=SHEP64, 1=SHEP333 [default 0]: ", 0);
                 int count = FIXED_COUNT;
                 string benchType = trimStr(askLine("Benchmark type: 1) speed  2) speed + diffusion report [default 1]: "));
                 if (benchType.empty()) benchType = "1";
