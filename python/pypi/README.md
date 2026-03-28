@@ -12,13 +12,6 @@
 - Range generation and benchmark commands
 - Interactive CLI mode
 
-## Unified naming and CLI notes
-
-- Use **SHEP32** for the primary format.
-- Use **SHEP333** for the extended format.
-- Use `--phrase` for phrases and `--key` for explicit keys.
-- Advanced compatibility flags such as `--direct-bits`, `--lane-bits`, and `--block-bytes` are still accepted but are hidden from regular help output.
-
 ## Key formats
 
 - **SHEP32** is the standard key format. It is a **32-byte** key, typically represented as a **64-character hexadecimal string**.
