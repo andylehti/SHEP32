@@ -6,13 +6,13 @@ SHEP32 is a multi-language toolkit for deterministic key generation, authenticat
 - `cpp/` for the native C++ implementation and native CLI
 - `js/` for the standalone JavaScript module and Node/browser CLI-style runner
 
-The codebase currently uses two names for the extended format. Older help or error text and parser descriptions may still say **extended** for **SHEP333**. The newer code path, internal mode value, and key derivation labels treat that extended format as **SHEP333**. In this README, **SHEP32** means the primary 32-byte format and **SHEP333** means the extended 333-bit format.
+The naming used by the repo is now standardized around **SHEP32** for the primary format and **SHEP333** for the extended format. The browser and HTML front end intentionally keep the exported JavaScript object name as `window.SHEP32` for compatibility. Older files or legacy text may still mention **SHEP64**, **extended**, or **SHEP72**. Those are compatibility leftovers, not the preferred names.
 
 ## What SHEP32 and SHEP333 are
 
 ### SHEP32
 
-SHEP32 is the primary output format. It is a **32-byte** value, normally shown as a **64-character lowercase hexadecimal string**. In mode `0`, the code treats a valid 64-hex string as a direct key token. When the input is not already a 64-hex token, the code deterministically derives one from text, integers, or file bytes.
+SHEP32 is the primary output format. It is a **32-byte** value, normally shown as a **64-character lowercase hexadecimal string**. In mode `0`, the code treats a valid 64-hex string as a direct key token. When the input is not already a 64-hex token, the code deterministically derives one from text or file bytes. Numeric-looking inputs must still be passed as text so leading zeros are preserved.
 
 #### Example SHEP32 Keys
 
@@ -99,7 +99,7 @@ For smaller inputs, the code can take a more direct route. It sentinel-encodes t
 
 ### 5. Extended SHEP333 generation
 
-The extended path builds a wide trace state, binds it through `fold64`, computes a 64-hex body, then injects eight auxiliary symbols at computed positions. That produces the extended transport form. The mode value used by the internal derivation code for this path is `333`, even where the CLI still presents it to the user as `mode 1` or “SHEP72.”
+The extended path builds a wide trace state, binds it through `fold64`, computes a 64-hex body, then injects eight auxiliary symbols at computed positions. That produces the extended transport form. The internal derivation path uses mode value `333`, while the current CLIs still expose it as `--mode 1` for compatibility.
 
 *See **How SHEP333 Works** Section.*
 
@@ -130,10 +130,12 @@ When decrypting, the reverse path checks the verification token, checks the auth
 SHEP32-main/
 ├── README.md
 ├── LICENSE
+├── docs/
 ├── python/
 │   ├── shep32.py
 │   ├── shep32cli.py
-│   └── app.py
+│   ├── legacy/
+│   └── pypi/
 ├── cpp/
 │   ├── shep32.cpp
 │   ├── audit.cpp
@@ -144,10 +146,12 @@ SHEP32-main/
 ├── js/
 │   ├── shep32.js
 │   └── shepCLI.js
-├── analyses/
 ├── audit/
+├── index.html
 └── offline GUI/
 ```
+
+Additional documentation is in `docs/CLI.md`.
 ## Install and use the Python version
 
 ### Option A: install from this repo into an environment
@@ -160,7 +164,7 @@ SHEP32-main/
 ```bash
 # Step 1:
 git clone https://github.com/andylehti/SHEP32.git
-cd SHEP32/python
+cd SHEP32/python/pypi
 # Step 2:
 python3 -m venv .venv
 source .venv/bin/activate
@@ -176,7 +180,7 @@ shep32 --help
 pip install shep32
 ```
 
-Depending on the published build, the CLI may be exposed as `shep32`, `pyshep`, or both.
+The published Python package installs the `shep32` command. Some older package builds may also expose `pyshep` as a compatibility alias.
 
 ### Python API example
 
@@ -193,6 +197,9 @@ ok = verifySignature("message", sig["signature"], sig["publicKey"])
 ## Python CLI commands
 
 The Python CLI uses **subcommands**. The full set is:
+
+Advanced compatibility flags such as `--direct-bits`, `--lane-bits`, and `--block-bytes` are still accepted for compatibility, but they are intentionally hidden from regular help output.
+
 
 - `start`
 - `key`
@@ -222,14 +229,13 @@ shep32
 
 ### `key`
 
-Generates a fresh random key, or derives one from text, integer, file, or phrase input.
+Generates a fresh random key, or derives one from text, file, or phrase input.
 
 Examples:
 
 ```bash
 shep32 key
 shep32 key --text "hello"
-shep32 key --value 12345
 shep32 key --file ./data.bin
 shep32 key --phrase "passphrase"
 shep32 key --mode 1 --text "1234"
@@ -238,7 +244,8 @@ shep32 key --phrase "1234" --mode 1
 
 Main options:
 
-- `--text`, `--value`, `--file`, `--phrase`: [choose the source]
+- `--text`, `--file`, `--phrase`: [choose the source]
+- numeric-looking inputs must still be passed with `--text` to preserve leading zeros
 - `--mode 0|1`: [SHEP32 vs SHEP333]
 - `--save PATH`: [write a] `.pkey` [file]
 
@@ -345,7 +352,7 @@ Main options:
 - `--text`, `--file`, `--stdin`: token source
 - `--body`, `--meta`: detached input pair
 - `--key`, `--phrase`, `--keyfile`: decryption key source
-- `--mode`: `0`, `1`, or blank for auto-detect
+- `--mode`: `0`, `1`, or blank for auto-detect when the key source is explicit
 - `--out`: write plaintext or restored file
 - `--as-text`: force text output even if the payload is a wrapped file
 - `--no-progress`: suppress progress
@@ -427,7 +434,8 @@ The browser runner supports the same command-style surface, but file operations 
 
 The JavaScript CLI uses **flat flags** instead of Python subcommands. The important actions are:
 
-- `--text`, `--value`, `--file`: generate a key from source input
+- `--text`, `--file`: generate a key from source input
+- numeric-looking inputs must still be passed with `--text` to preserve leading zeros
 - `--start ... --hashes ...`: range mode
 - `--bench N`: benchmark mode
 - `--pair`: show internal key pair
@@ -510,7 +518,7 @@ shep32-cpp --start 0 --hashes 10
 shep32-cpp --bench 1000 --compare
 ```
 
-The flat command set matches the help text in `cpp/shep32.cpp`: hash input by `--text` / `--value` / `--file`, encryption/decryption flags, detached mode, signing, verification, internal pair inspection, range generation, and benchmark/audit flags.
+The flat command set matches the help text in `cpp/shep32.cpp`: hash input by `--text` / `--file`, encryption/decryption flags, detached mode, signing, verification, internal pair inspection, range generation, and benchmark/audit flags. Numeric-looking inputs must still be passed with `--text` so leading zeros are preserved.
 
 ## Common concepts across all versions
 
@@ -519,7 +527,7 @@ The flat command set matches the help text in `cpp/shep32.cpp`: hash input by `-
 A command may accept:
 
 - raw text
-- an integer
+- numeric-looking text passed with `--text`
 - a file
 - a passphrase
 - a direct key token

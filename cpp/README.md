@@ -61,22 +61,28 @@ cpp/bin/shep32-cpp
 
 ## Common commands
 
-Generate a key from text:
+Generate a SHEP32 key from text:
 
 ```bash
 ./bin/shep32-cpp --text "hello"
 ```
 
-Generate an extended key:
+Generate a SHEP333 key:
 
 ```bash
 ./bin/shep32-cpp --mode 1 --text "hello"
 ```
 
-Encrypt text:
+Encrypt text with a phrase:
 
 ```bash
-./bin/shep32-cpp --encrypt "secret" --key "passphrase"
+./bin/shep32-cpp --encrypt "secret" --phrase "password"
+```
+
+Encrypt text with an explicit key:
+
+```bash
+./bin/shep32-cpp --encrypt "secret" --key "<shep32-or-shep333-key>"
 ```
 
 Encrypt a file:
@@ -114,3 +120,14 @@ Run a benchmark:
 ```bash
 ./bin/shep32-cpp --bench 1000
 ```
+
+
+## Unified key input rules
+
+- `--key` means an explicit SHEP32 or SHEP333 key.
+- `--phrase` means an explicit phrase, even if it resembles a key.
+- `--keyfile` means a file containing an explicit key.
+- `--mode 0` selects SHEP32.
+- `--mode 1` selects SHEP333.
+- `--json` and `--version` are available in the native CLI.
+- Advanced compatibility flags such as `--direct-bits`, `--lane-bits`, and `--block-bytes` are still accepted but hidden from regular help output.

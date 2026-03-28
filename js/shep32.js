@@ -346,6 +346,7 @@ const FILE_MARKER = '__shep_file__'
 const DEFAULT_MAX_BYTES = 1000 * 1024
 const CHUNK_UNIT = 2048
 const FIXED_COUNT = 8
+const CLI_VERSION = '2.1.0'
 const mask64 = (1n << 64n) - 1n
 
 const piMatrix = [
@@ -1282,11 +1283,11 @@ function privateKeyFromSeed(seed) { const prefix = Buffer.from('302e020100300506
 function generatePublicKey(k, keyMode = 0, count = 8) { const resolved = resolveKeyString(k, false, keyMode === 0 ? 0 : 333, count), hKey = resolved[0]; const seed = hexToBytes(deriveInternalKey(hKey, keyMode === 0 ? 0 : 333, count, 'PUBSEED')); const priv = privateKeyFromSeed(seed); const pub = crypto.createPublicKey(priv).export({ format: 'der', type: 'spki' }); return packPortableBytes(pub.subarray(pub.length - 32)) }
 function signData(data, k, keyMode = 0, count = 8) { const resolved = resolveKeyString(k, false, keyMode === 0 ? 0 : 333, count), hKey = resolved[0]; const seed = hexToBytes(deriveInternalKey(hKey, keyMode === 0 ? 0 : 333, count, 'PUBSEED')); const priv = privateKeyFromSeed(seed); const sig = crypto.sign(null, Buffer.from(data, 'utf8'), priv); const pub = crypto.createPublicKey(priv).export({ format: 'der', type: 'spki' }); return { signature: packPortableBytes(sig), publicKey: packPortableBytes(pub.subarray(pub.length - 32)) } }
 function verifySignature(data, signature, publicKey) { try { const sig = unpackPortableBytes(signature), pub = unpackPortableBytes(publicKey); const prefix = Buffer.from('302a300506032b6570032100', 'hex'); const key = crypto.createPublicKey({ key: Buffer.concat([prefix, pub]), format: 'der', type: 'spki' }); return crypto.verify(null, Buffer.from(data, 'utf8'), key, sig) } catch { return false } }
-function generateHashRange(start, hashes, mode = 0, count = 8, directBits = 256, laneBits = 336, blockBytes = 4096, bare = false) { const out = []; let cur = parseDec(start), curText = bare ? '' : decStr(start); for (let i = 0; i < hashes; ++i) { const hash = generateKey(cur, mode, count, directBits, laneBits, blockBytes); if (bare) out.push(hash); else { out.push(curText + ' = ' + hash); curText = incDecString(curText) } cur += 1n } return out }
+function generateHashRange(start, hashes, mode = 0, count = 8, directBits = 256, laneBits = 336, blockBytes = 4096, bare = false) { const out = []; let cur = parseDec(start), curText = decStr(start); for (let i = 0; i < hashes; ++i) { const hash = generateKey(curText, mode, count, directBits, laneBits, blockBytes); if (bare) out.push(hash); else { out.push(curText + ' = ' + hash) } cur += 1n; curText = incDecString(curText) } return out }
 function writeHashRange(outPath, start, hashes, mode = 0, count = 8, directBits = 256, laneBits = 336, blockBytes = 4096, bare = false) { fs.writeFileSync(outPath, generateHashRange(start, hashes, mode, count, directBits, laneBits, blockBytes, bare).join('\n') + '\n') }
 function formatKeyFile(token) { return KEY_HEADER + trimStr(token) + KEY_FOOTER }
 function writeKeyFilePath(p, token) { fs.writeFileSync(p, formatKeyFile(token)) }
-function parseKeyFileText(text) { const t = String(text), kh = trimStr(KEY_HEADER), kf = trimStr(KEY_FOOTER), a = t.indexOf(kh), b = a === -1 ? -1 : t.indexOf(kf, a + kh.length); if (a !== -1 && b !== -1 && b > a) { let mid = t.slice(a + kh.length); const nl = mid.indexOf('\n'); if (nl !== -1) mid = mid.slice(nl + 1); const end = mid.indexOf(kf); if (end !== -1) mid = trimStr(mid.slice(0, end)); if (mid) return mid } for (const line of t.split(/\r?\n/)) { const x = trimStr(line); if (x) return x } throw new Error('invalid key file format') }
+function parseKeyFileText(text) { const t = String(text).replace(/\r\n/g, '\n'), wrappers = [[trimStr(KEY_HEADER), trimStr(KEY_FOOTER)], ['-----BEGIN SHEP KEY-----', '-----END SHEP KEY-----'], ['-----BEGIN SHEP32 KEY-----', '-----END SHEP32 KEY-----'], ['-----BEGIN SHEP64 KEY-----', '-----END SHEP64 KEY-----'], ['-----BEGIN SHEP333 KEY-----', '-----END SHEP333 KEY-----']]; for (const [kh, kf] of wrappers) { const a = t.indexOf(kh), b = a === -1 ? -1 : t.indexOf(kf, a + kh.length); if (a !== -1 && b !== -1 && b > a) { let mid = t.slice(a + kh.length); const nl = mid.indexOf('\n'); if (nl !== -1) mid = mid.slice(nl + 1); const end = mid.indexOf(kf); if (end !== -1) mid = trimStr(mid.slice(0, end)); if (mid) return mid } } for (const line of t.split(/\r?\n/)) { const x = trimStr(line); if (x) return x } throw new Error('invalid key file format') }
 function loadKeyFile(p) { return parseKeyFileText(fs.readFileSync(p, 'utf8')) }
 
 
@@ -1459,9 +1460,8 @@ function printHelpText(exe) {
   ${exe} --body BODY --meta META --key KEY [options]
 
 Hash inputs:
-  --text TEXT         Generate a SHEP64 or SHEP333 key from UTF-8 text
-  --value INT         Generate a SHEP64 or SHEP333 key from a decimal integer
-  --file PATH         Generate a SHEP64 or SHEP333 key from file contents
+  --text TEXT         Generate a SHEP32 or SHEP333 key from UTF-8 text
+  --file PATH         Generate a SHEP32 or SHEP333 key from file contents
   --start INT         Starting integer for range generation
   --hashes N          Number of keys to generate from --start
   --out PATH          Write range or cipher output to file
@@ -1476,7 +1476,8 @@ Encryption / decryption:
   --detached          Use detached meta/body format
   --meta META         Detached meta token or file path
   --body BODY         Detached body token or file path
-  --key KEY           Passphrase, primary key, or extended key
+  --key KEY           Explicit SHEP32 or SHEP333 key
+  --phrase TEXT       Explicit phrase, even if it looks like a key
   --keyfile PATH      Read a SHEP key from a .pkey file
   --write-key PATH    Save the resulting SHEP key to a .pkey file
   --quiet-key         Do not print the key token
@@ -1496,10 +1497,7 @@ Other features:
   --pair              Print the internal encryption key pair
 
 General options:
-  --mode N            0 = SHEP64 primary, 1 = SHEP333 extended
-  --direct-bits N     Direct-route threshold bits (default 256)
-  --lane-bits N       Reserved compatibility option (default 336)
-  --block-bytes N     Reserved compatibility option (default 4096 or 65536 for files)
+  --mode N            0 = SHEP32 primary, 1 = SHEP333 extended
   --bare              Output only hashes in range mode
   --bench N           Benchmark N hashes; random inputs by default
   --input-bits N      Benchmark input width in 2..256 (default 128)
@@ -1507,7 +1505,11 @@ General options:
   --deep-audit        Include pair-dependence analysis in compare mode
   --top-count N       Top-cell count for compare mode (default 128)
   --audit-dir PATH    Write detailed audit TSV files to PATH
+  --json              Emit JSON instead of plain text when supported
+  --version           Show CLI version
   --help              Show this help
+
+Advanced compatibility flags such as --direct-bits, --lane-bits, and --block-bytes are still accepted but hidden from the regular help output.
 `)
 }
 async function runCli(argvInput, ctx = {}) {
@@ -1522,6 +1524,8 @@ async function runCli(argvInput, ctx = {}) {
     const has = name => Object.prototype.hasOwnProperty.call(opts, name)
     const need = name => { if (!has(name)) throw new Error('missing value for ' + name); return String(opts[name]) }
     const optInt = (name, defVal) => has(name) ? parseInt(String(opts[name]), 10) : defVal
+    const jsonMode = has('--json')
+    const emitObj = obj => out(JSON.stringify(obj) + '\n')
     const mode = has('--mode') ? parseInt(String(opts['--mode']), 10) : 0
     const count = 8
     const directBits = has('--direct-bits') ? parseInt(String(opts['--direct-bits']), 10) : 256
@@ -1540,6 +1544,8 @@ async function runCli(argvInput, ctx = {}) {
       return trimStr(data.slice(a + start.length, b))
     }
     if (has('--help') || has('-h')) { out(printHelpText(exe)); return { stdout, stderr, exitCode, files: !isNode ? fs.getFiles() : null } }
+    if (has('--version')) { out(exe + ' ' + CLI_VERSION + '\n'); return { stdout, stderr, exitCode, files: !isNode ? fs.getFiles() : null } }
+    if (has('--value')) throw new Error('--value is not supported; use --text so leading zeros are preserved')
     if (mode !== 0 && mode !== 1 && mode !== 333) throw new Error('--mode must be 0 or 1')
     if (directBits < 1) throw new Error('--direct-bits must be >= 1')
     const chunkBytes = resolveChunkBytes(has('--chunk-size') ? parseInt(String(opts['--chunk-size']), 10) : 1, has('--chunk-bytes') ? parseInt(String(opts['--chunk-bytes']), 10) : -1)
@@ -1551,37 +1557,42 @@ async function runCli(argvInput, ctx = {}) {
     const noLimit = has('--no-limit')
     const quietKey = has('--quiet-key')
     const doDetached = has('--detached')
-    const hasKey = has('--key') || has('--keyfile')
-    if (has('--key') && has('--keyfile')) throw new Error('provide only one of --key or --keyfile')
-    const keyText = has('--keyfile') ? loadKeyFile(String(opts['--keyfile'])) : (has('--key') ? String(opts['--key']) : '')
+    const keySourceCount = (has('--key') ? 1 : 0) + (has('--phrase') ? 1 : 0) + (has('--keyfile') ? 1 : 0)
+    if (keySourceCount > 1) throw new Error('provide only one of --key, --phrase, or --keyfile')
+    const hasKey = keySourceCount > 0
+    const keyText = has('--keyfile') ? loadKeyFile(String(opts['--keyfile'])) : (has('--key') ? String(opts['--key']) : (has('--phrase') ? String(opts['--phrase']) : ''))
     if (has('--pair')) {
       const pairMode = mode === 0 ? 0 : 333
       let master
       if (has('--file')) master = generateKeyFile(String(opts['--file']), pairMode === 0 ? 0 : 1, count, directBits, laneBits, blockBytes)
-      else if (has('--value')) master = generateKey(String(opts['--value']), pairMode === 0 ? 0 : 1, count, directBits, laneBits, blockBytes)
       else if (has('--text')) master = generateKey(String(opts['--text']), pairMode === 0 ? 0 : 1, count, directBits, laneBits, blockBytes)
-      else throw new Error('--pair requires --text, --value, or --file')
+      else throw new Error('--pair requires --text or --file')
       const pair = computeKeyPair(master, pairMode, count)
-      out('key1=' + pair.key1 + '\n' + 'key2=' + pair.key2 + '\n' + 'schedText=' + pair.schedText + '\n' + 'mixHex=' + pair.mixHex + '\n' + 'remix=' + pair.remix + '\n')
+      if (jsonMode) emitObj({ ok: true, mode: 'pair', key1: pair.key1, key2: pair.key2, schedText: pair.schedText, mixHex: pair.mixHex, remix: pair.remix })
+      else out('key1=' + pair.key1 + '\n' + 'key2=' + pair.key2 + '\n' + 'schedText=' + pair.schedText + '\n' + 'mixHex=' + pair.mixHex + '\n' + 'remix=' + pair.remix + '\n')
       return { stdout, stderr, exitCode, files: !isNode ? fs.getFiles() : null }
     }
     if (has('--pubkey')) {
       if (!hasKey) throw new Error('--key or --keyfile is required for --pubkey')
-      out((await generatePublicKeyAsync(keyText, mode === 0 ? 0 : 333, count)) + '\n')
+      const pub = await generatePublicKeyAsync(keyText, mode === 0 ? 0 : 333, count)
+      if (jsonMode) emitObj({ ok: true, mode: 'pubkey', publicKey: pub })
+      else out(pub + '\n')
       return { stdout, stderr, exitCode, files: !isNode ? fs.getFiles() : null }
     }
     if (has('--sign')) {
       if (!hasKey) throw new Error('--key or --keyfile is required for --sign')
       const payload = useStdin ? readStdinPayload() : String(opts['--sign'])
       const sig = await signDataAsync(payload, keyText, mode === 0 ? 0 : 333, count)
-      out('signature=' + sig.signature + '\n' + 'publicKey=' + sig.publicKey + '\n')
+      if (jsonMode) emitObj({ ok: true, mode: 'sign', signature: sig.signature, publicKey: sig.publicKey })
+      else out('signature=' + sig.signature + '\n' + 'publicKey=' + sig.publicKey + '\n')
       return { stdout, stderr, exitCode, files: !isNode ? fs.getFiles() : null }
     }
     if (has('--verify')) {
       if (!has('--signature') || !has('--public-key')) throw new Error('--signature and --public-key are required for --verify')
       const payload = useStdin ? readStdinPayload() : String(opts['--verify'])
       const ok = await verifySignatureAsync(payload, maybeLoadTokenText(String(opts['--signature'])), maybeLoadTokenText(String(opts['--public-key'])))
-      out((ok ? 'true' : 'false') + '\n')
+      if (jsonMode) emitObj({ ok: true, mode: 'verify', valid: !!ok })
+      else out((ok ? 'true' : 'false') + '\n')
       return { stdout, stderr, exitCode, files: !isNode ? fs.getFiles() : null }
     }
     if (has('--encrypt-file') || (has('--encrypt') && has('--file'))) {
@@ -1596,13 +1607,15 @@ async function runCli(argvInput, ctx = {}) {
         fs.writeFileSync(bodyPath, res.body, 'utf8'); fs.writeFileSync(metaPath, res.meta, 'utf8')
         const keyPath = has('--write-key') ? String(opts['--write-key']) : defaultDetachedKeyPath(base)
         writeKeyFilePath(keyPath, res.key)
-        out(bodyPath + '\n' + metaPath + '\n' + keyPath + '\n'); if (!quietKey) out(res.key + '\n')
+        if (jsonMode) emitObj({ ok: true, mode: 'enc', detached: true, body_out: bodyPath, meta_out: metaPath, key_out: keyPath, key: quietKey ? '' : res.key, chunk_bytes: chunkBytes })
+        else { out(bodyPath + '\n' + metaPath + '\n' + keyPath + '\n'); if (!quietKey) out(res.key + '\n') }
       } else {
         const cipherPath = outPath ? ensureExtPath(outPath, '.sh32', 'cipher.sh32') : defaultEncOutPath(src)
         fs.writeFileSync(cipherPath, res.cipher, 'utf8')
         const keyPath = has('--write-key') ? String(opts['--write-key']) : defaultKeyOutPath(cipherPath)
         writeKeyFilePath(keyPath, res.key)
-        out(cipherPath + '\n' + keyPath + '\n'); if (!quietKey) out(res.key + '\n')
+        if (jsonMode) emitObj({ ok: true, mode: 'enc', detached: false, out: cipherPath, key_out: keyPath, key: quietKey ? '' : res.key, chunk_bytes: chunkBytes })
+        else { out(cipherPath + '\n' + keyPath + '\n'); if (!quietKey) out(res.key + '\n') }
       }
       return { stdout, stderr, exitCode, files: !isNode ? fs.getFiles() : null }
     }
@@ -1618,9 +1631,10 @@ async function runCli(argvInput, ctx = {}) {
           writeKeyFilePath(keyPath, res.key)
           out(bodyPath + '\n' + metaPath + '\n' + keyPath + '\n')
         } else {
-          out('meta=' + res.meta + '\n' + 'body=' + res.body + '\n')
+          if (jsonMode) emitObj({ ok: true, mode: 'enc', detached: true, body: res.body, meta: res.meta, key: quietKey ? '' : res.key, key_out: has('--write-key') ? String(opts['--write-key']) : '', chunk_bytes: chunkBytes })
+          else { out('meta=' + res.meta + '\n' + 'body=' + res.body + '\n')
           if (has('--write-key')) { writeKeyFilePath(String(opts['--write-key']), res.key); out(String(opts['--write-key']) + '\n') }
-          else if (!quietKey) out(res.key + '\n')
+          else if (!quietKey) out(res.key + '\n') }
         }
       } else {
         if (outPath) {
@@ -1628,11 +1642,13 @@ async function runCli(argvInput, ctx = {}) {
           fs.writeFileSync(cipherPath, res.cipher, 'utf8')
           const keyPath = has('--write-key') ? String(opts['--write-key']) : defaultKeyOutPath(cipherPath)
           writeKeyFilePath(keyPath, res.key)
-          out(cipherPath + '\n' + keyPath + '\n')
+          if (jsonMode) emitObj({ ok: true, mode: 'enc', detached: false, out: cipherPath, key_out: keyPath, chunk_bytes: chunkBytes })
+          else out(cipherPath + '\n' + keyPath + '\n')
         } else {
-          out(res.cipher + '\n')
+          if (jsonMode) emitObj({ ok: true, mode: 'enc', detached: false, cipher: res.cipher, key: quietKey ? '' : res.key, key_out: has('--write-key') ? String(opts['--write-key']) : '', chunk_bytes: chunkBytes })
+          else { out(res.cipher + '\n')
           if (has('--write-key')) { writeKeyFilePath(String(opts['--write-key']), res.key); out(String(opts['--write-key']) + '\n') }
-          else if (!quietKey) out(res.key + '\n')
+          else if (!quietKey) out(res.key + '\n') }
         }
       }
       return { stdout, stderr, exitCode, files: !isNode ? fs.getFiles() : null }
@@ -1652,8 +1668,9 @@ async function runCli(argvInput, ctx = {}) {
         pt = await decryptDataExAsync(token, keyText, decMode, count, null)
       }
       const restored = !asText ? unpackFilePayload(pt) : null
-      if (restored) { const target = outPath ? outPath : restored.name; fs.writeFileSync(target, restored.data); out(target + '\n') }
-      else if (outPath) { fs.writeFileSync(outPath, pt, 'utf8'); out(outPath + '\n') }
+      if (restored) { const target = outPath ? outPath : restored.name; fs.writeFileSync(target, restored.data); if (jsonMode) emitObj({ ok: true, mode: 'dec', out: target, restored_name: restored.name }) ; else out(target + '\n') }
+      else if (outPath) { fs.writeFileSync(outPath, pt, 'utf8'); if (jsonMode) emitObj({ ok: true, mode: 'dec', out: outPath }) ; else out(outPath + '\n') }
+      else if (jsonMode) emitObj({ ok: true, mode: 'dec', text: pt })
       else out(pt + '\n')
       return { stdout, stderr, exitCode, files: !isNode ? fs.getFiles() : null }
     }
@@ -1674,15 +1691,16 @@ async function runCli(argvInput, ctx = {}) {
             const bytes = new Uint8Array(Math.ceil(inputBits / 8)); globalThis.crypto.getRandomValues(bytes); input = 0n; for (const b of bytes) input = (input << 8n) + BigInt(b); input &= ((1n << BigInt(inputBits)) - 1n)
           }
         } else { input = cur; cur += 1n }
-        last = generateKey(input, mode, count, directBits, laneBits, blockBytes)
+        last = generateKey(decStr(input), mode, count, directBits, laneBits, blockBytes)
       }
       const elapsed = Math.max(0.000001, (Date.now() - started) / 1000)
-      out('hashes=' + hashes + '\n')
+      if (jsonMode) emitObj({ ok: true, mode: 'bench', hashes, elapsed: Number(elapsed.toFixed(6)), hashesPerSec: Number((hashes / elapsed).toFixed(6)), last, randomInputs, inputBits })
+      else { out('hashes=' + hashes + '\n')
       out('elapsed=' + elapsed.toFixed(6) + '\n')
       out('hashesPerSec=' + (hashes / elapsed).toFixed(6) + '\n')
       out('last=' + last + '\n')
       out('randomInputs=' + (randomInputs ? 'true' : 'false') + '\n')
-      out('inputBits=' + inputBits + '\n')
+      out('inputBits=' + inputBits + '\n') }
       return { stdout, stderr, exitCode, files: !isNode ? fs.getFiles() : null }
     }
     if (has('--start') || has('--hashes') || (!!outPath && !has('--encrypt') && !has('--encrypt-file'))) {
@@ -1690,14 +1708,15 @@ async function runCli(argvInput, ctx = {}) {
       if (!has('--hashes')) throw new Error('--hashes is required for range mode')
       const startValue = parseDec(String(opts['--start']))
       const hashes = parseInt(String(opts['--hashes']), 10)
-      if (outPath) writeHashRange(outPath, startValue, hashes, mode, count, directBits, laneBits, blockBytes, bare)
-      else out(generateHashRange(startValue, hashes, mode, count, directBits, laneBits, blockBytes, bare).join('\n') + '\n')
+      if (outPath) { writeHashRange(outPath, startValue, hashes, mode, count, directBits, laneBits, blockBytes, bare); if (jsonMode) emitObj({ ok: true, mode: 'range', out: outPath, start: decStr(startValue), hashes, bare }) }
+      else { const lines = generateHashRange(startValue, hashes, mode, count, directBits, laneBits, blockBytes, bare); if (jsonMode) emitObj({ ok: true, mode: 'range', start: decStr(startValue), hashes, bare, lines }) ; else out(lines.join('\n') + '\n') }
       return { stdout, stderr, exitCode, files: !isNode ? fs.getFiles() : null }
     }
-    if (has('--file')) { out(generateKeyFile(String(opts['--file']), mode, count, directBits, laneBits, 65536) + '\n'); return { stdout, stderr, exitCode, files: !isNode ? fs.getFiles() : null } }
-    if (has('--text')) { out(generateKey(String(opts['--text']), mode, count, directBits, laneBits, blockBytes) + '\n'); return { stdout, stderr, exitCode, files: !isNode ? fs.getFiles() : null } }
-    if (has('--value')) { out(generateKey(String(opts['--value']), mode, count, directBits, laneBits, blockBytes) + '\n'); return { stdout, stderr, exitCode, files: !isNode ? fs.getFiles() : null } }
-    out(generateKey(mode, count, directBits, laneBits, blockBytes) + '\n')
+    if (has('--file')) { const key = generateKeyFile(String(opts['--file']), mode, count, directBits, laneBits, 65536); if (jsonMode) emitObj({ ok: true, mode: 'hash', value: key }) ; else out(key + '\n'); return { stdout, stderr, exitCode, files: !isNode ? fs.getFiles() : null } }
+    if (has('--text')) { const key = generateKey(String(opts['--text']), mode, count, directBits, laneBits, blockBytes); if (jsonMode) emitObj({ ok: true, mode: 'hash', value: key }) ; else out(key + '\n'); return { stdout, stderr, exitCode, files: !isNode ? fs.getFiles() : null } }
+    const key = generateKey(mode, count, directBits, laneBits, blockBytes)
+    if (jsonMode) emitObj({ ok: true, mode: 'key', key })
+    else out(key + '\n')
   } catch (e) {
     err('error: ' + e.message + '\n')
     exitCode = 1
