@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SHEP32 Encryption Toolkit</title>
+    <title>SHEP-32 Encryption Protocol</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
@@ -34,7 +34,7 @@
     </script>
 
     <!-- Core SHEP32 Module -->
-    <script src="https://raw.githubusercontent.com/andylehti/SHEP32/main/js/shep32.js"></script>
+    <script src="./js/shep32.js"></script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -533,7 +533,7 @@
          * MAIN APPLICATION
          */
         const App = () => {
-            const defaultScriptUrl = 'https://raw.githubusercontent.com/andylehti/SHEP32/refs/heads/main/js/shep32.js';
+            const defaultScriptUrl = './js/shep32.js';
             const [coreLoaded, setCoreLoaded] = useState(false);
             const [coreError, setCoreError] = useState('');
             const [activeTab, setActiveTab] = useState('about'); 
@@ -721,6 +721,8 @@
                 }
 
                 setProcessingType('encrypt');
+                setProgressDone(0);
+                setProgressTotal(1);
                 setIsProcessing(true);
 
                 setTimeout(async () => {
@@ -737,8 +739,10 @@
                         }
 
                         const isCompressibleFile = (encInputType === 'file' && encFile.size > 5120);
-                        const outResult = await window.SHEP32.encryptDataAsync(payloadStr, targetKey, modeValue, 8, false, isCompressibleFile);
+                        const outResult = await window.SHEP32.encryptDataAsync(payloadStr, targetKey, modeValue, 8, false, isCompressibleFile, 2048, 0, '0', '', '', '', ({ done, total }) => { setProgressDone(done); setProgressTotal(total); });
                         
+                        setProgressDone(1);
+                        setProgressTotal(1);
                         setIsProcessing(false);
                         setEncResult({ 
                             c: outResult.cipher, 
@@ -772,12 +776,14 @@
                 }
 
                 setProcessingType('decrypt');
+                setProgressDone(0);
+                setProgressTotal(1);
                 setIsProcessing(true);
 
                 setTimeout(async () => {
                     try {
                         const modeValue = decIsExtended ? 333 : 0;
-                        const outText = await window.SHEP32.decryptDataExAsync(payloadStr, decActiveKey, modeValue, 8);
+                        const outText = await window.SHEP32.decryptDataExAsync(payloadStr, decActiveKey, modeValue, 8, null, ({ done, total }) => { setProgressDone(done); setProgressTotal(total); });
                         
                         let isFileRestored = false;
                         let restoredName = 'restored_data.bin';
@@ -797,6 +803,8 @@
                             }
                         }
 
+                        setProgressDone(1);
+                        setProgressTotal(1);
                         setIsProcessing(false);
                         setDecResult({ isFile: isFileRestored || decOutputChoice === 'file', name: restoredName, dataBytes: pureData, text: textResult });
 
@@ -996,7 +1004,7 @@
                                 <Icon n="shield" className="w-10 h-10 text-cyan-500" />
                             </div>
                             <div className="flex-grow text-center md:text-left">
-                                <h1 className="text-4xl md:text-5xl font-black text-white tracking-tighter">SHEP32</h1>
+                                <h1 className="text-4xl md:text-5xl font-black text-white tracking-tighter">SHEP-32</h1>
                                 <p className="text-cyan-500 font-mono text-[10px] md:text-xs uppercase tracking-[0.2em] mt-2">
                                     Series Hashing Encryption Protocol
                                 </p>
@@ -1033,22 +1041,22 @@
                                     <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6 md:p-8 shadow-xl">
                                         <div className="flex items-center gap-3 mb-6 border-b border-zinc-800 pb-4">
                                             <Icon n="info" className="w-6 h-6 text-cyan-500" />
-                                            <h2 className="text-xl font-bold text-white uppercase tracking-widest">About SHEP32</h2>
+                                            <h2 className="text-xl font-bold text-white uppercase tracking-widest">About SHEP-32</h2>
                                         </div>
                                         
                                         <div className="space-y-6 text-sm text-zinc-400 leading-relaxed font-sans">
                                             <section>
-                                                <h3 className="text-white font-bold mb-2 uppercase tracking-wider text-xs">What is SHEP32?</h3>
+                                                <h3 className="text-white font-bold mb-2 uppercase tracking-wider text-xs">What is SHEP-32?</h3>
                                                 <p className="mb-2">
-                                                    SHEP32 is a deterministic key generation, encryption, decryption, signing, and verification system. The name SHEP32 refers to the primary 32-byte output format, which is typically represented as a 64-character hexadecimal key.
+                                                    SHEP-32 is a deterministic key generation, encryption, decryption, signing, and verification system. The name SHEP-32 refers to the primary 32-byte output format, which is typically represented as a 64-character hexadecimal key.
                                                 </p>
                                                 <p className="mb-2">The project supports two key formats:</p>
                                                 <ul className="list-disc pl-5 space-y-1 mb-2 text-zinc-300">
-                                                    <li><strong>SHEP32:</strong> the primary 32-byte key format</li>
+                                                    <li><strong>SHEP-32:</strong> the primary 32-byte key format</li>
                                                     <li><strong>SHEP333:</strong> the extended 333-bit key format</li>
                                                 </ul>
                                                 <p>
-                                                    SHEP333 is the extended mode built for the wider output path. It is distinct from the standard 32-byte SHEP32 format.
+                                                    SHEP333 is the extended mode built for the wider output path. It is distinct from the standard 32-byte SHEP-32 format.
                                                 </p>
                                             </section>
 
@@ -1089,7 +1097,7 @@
                                             <section>
                                                 <h3 className="text-white font-bold mb-2 uppercase tracking-wider text-xs">Output formats</h3>
                                                 <ul className="list-disc pl-5 space-y-1 text-zinc-300">
-                                                    <li>SHEP32 keys are 32 bytes.</li>
+                                                    <li>SHEP-32 keys are 32 bytes.</li>
                                                     <li>SHEP333 keys are 333 bits.</li>
                                                 </ul>
                                             </section>
@@ -1205,7 +1213,7 @@
                                                                 <p className="text-[10px] text-amber-500 flex items-center gap-1"><Icon n="info" className="w-3 h-3"/> Keyphrases are inherently less secure than generated keys.</p>
                                                                 {encDerivedKey && (
                                                                     <div className="mt-3 p-3 bg-zinc-950 rounded-lg border border-zinc-800">
-                                                                        <span className="text-[10px] text-zinc-500 uppercase block mb-1">Derived {encIsExtended ? 'SHEP333' : 'SHEP32'} Key</span>
+                                                                        <span className="text-[10px] text-zinc-500 uppercase block mb-1">Derived {encIsExtended ? 'SHEP333' : '64-Hex'} Key</span>
                                                                         <span className="text-xs font-mono text-cyan-400 break-all">{encDerivedKey}</span>
                                                                     </div>
                                                                 )}
@@ -1266,7 +1274,7 @@
                                             </div>
                                             <h2 className="text-2xl font-black text-white mb-2 tracking-tight">Encryption Complete</h2>
                                             <p className="text-zinc-400 text-sm mb-8 font-mono bg-zinc-950 inline-block px-4 py-1.5 rounded-md border border-zinc-800">
-                                                Target: {encResult.isFile ? encResult.origName : (encResult.customName ? `${encResult.customName}.sh32` : 'Plaintext Stream')}
+                                                Target: {encResult.isFile ? encResult.origName : (encResult.customName ? `${encResult.customName}.shep32` : 'Plaintext Stream')}
                                             </p>
 
                                             {encResult.isAutoKey && (
@@ -1278,7 +1286,7 @@
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto mb-8">
                                                 <button 
                                                     onClick={() => {
-                                                        const ext = '.sh32';
+                                                        const ext = encResult.isFile ? (DOC_EXTS.includes(encResult.origName.substring(encResult.origName.lastIndexOf('.')).toLowerCase()) ? '.sh3' : '.shep32') : '.shep32';
                                                         const name = encResult.isFile ? (encResult.origName.substring(0, encResult.origName.lastIndexOf('.')) || encResult.origName) : (encResult.customName || 'encrypted_text');
                                                         downloadBlob(encResult.c, `${name}${ext}`, 'text/plain');
                                                     }}
@@ -1337,7 +1345,7 @@
                                             <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6">
                                                 <h2 className="text-sm font-bold text-white uppercase tracking-widest mb-4 flex items-center">
                                                     1. Encrypted Data
-                                                    <InfoTooltip text="Paste Base62 ciphertext or upload an encrypted file (.sh32). Both modes are supported." />
+                                                    <InfoTooltip text="Paste Base62 ciphertext or upload an encrypted file (.shep32 / .sh3). Both modes are supported." />
                                                 </h2>
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                                     <div className="flex flex-col">
@@ -1357,7 +1365,7 @@
                                                     <div className="flex flex-col justify-center">
                                                         <FileDropzone 
                                                             label="Upload Encrypted File" 
-                                                            accept=".sh32,*" 
+                                                            accept=".shep32,.sh3,*" 
                                                             disabled={decInputType === 'text'} 
                                                             file={decFile}
                                                             onFile={handleDecryptFileUpload}
@@ -1420,7 +1428,7 @@
                                                                 />
                                                                 {decDerivedKey && (
                                                                     <div className="mt-3 p-3 bg-zinc-950 rounded-lg border border-zinc-800">
-                                                                        <span className="text-[10px] text-zinc-500 uppercase block mb-1">Derived {decIsExtended ? 'SHEP333' : 'SHEP32'} Key</span>
+                                                                        <span className="text-[10px] text-zinc-500 uppercase block mb-1">Derived {decIsExtended ? 'SHEP333' : '64-Hex'} Key</span>
                                                                         <span className="text-xs font-mono text-cyan-400 break-all">{decDerivedKey}</span>
                                                                     </div>
                                                                 )}
@@ -1589,7 +1597,7 @@
                                                 disabled={genUsePhrase && !genPhrase.trim()}
                                                 className="flex-grow px-6 py-4 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold text-sm uppercase tracking-widest shadow-lg disabled:opacity-50 transition-all flex items-center justify-center gap-2"
                                             >
-                                                <Icon n="key" className="w-5 h-5" /> Generate {genIsExtended ? 'SHEP333' : 'SHEP32'} Key
+                                                <Icon n="key" className="w-5 h-5" /> Generate {genIsExtended ? 'SHEP333' : '64-Hex'} Key
                                             </button>
                                         </div>
 
@@ -1739,7 +1747,7 @@
                                         <div className="flex justify-between items-center mb-4 border-b border-zinc-800 pb-3">
                                             <h3 className="text-[10px] md:text-xs font-bold text-zinc-500 uppercase tracking-[0.2em] w-1/3">EVALUATION METRICS</h3>
                                             <h3 className="text-[10px] md:text-xs font-bold text-cyan-500 uppercase tracking-[0.2em] w-1/3 text-center flex justify-center items-center gap-2">
-                                                <Icon n="shield" className="w-3.5 h-3.5 hidden sm:block"/> SHEP32
+                                                <Icon n="shield" className="w-3.5 h-3.5 hidden sm:block"/> SHEP-32
                                             </h3>
                                             <h3 className="text-[10px] md:text-xs font-bold text-zinc-400 uppercase tracking-[0.2em] w-1/3 text-right flex justify-end items-center gap-2">
                                                 SHA-256
