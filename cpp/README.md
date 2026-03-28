@@ -55,6 +55,7 @@ cpp/bin/shep32-cpp
 ## Requirements
 
 - `g++` with C++17 support
+- Boost Multiprecision headers (`boost/multiprecision/cpp_int.hpp`)
 - OpenSSL development headers and libraries
 - zlib development headers and libraries
 
