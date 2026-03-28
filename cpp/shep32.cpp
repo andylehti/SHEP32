@@ -32,6 +32,7 @@ using boost::multiprecision::cpp_int;
 
 cpp_int parseDec(const string& s);
 string trimStr(const string& s);
+string jsonEscape(const string& s);
 
 const string gCharBase = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.:;<>?@[]^&()*$%/\\`\"',_!#";
 const string gAuxBase = "ghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -41,6 +42,7 @@ const string FILE_MARKER = "__shep_file__";
 const uint64_t DEFAULT_MAX_BYTES = 1000ULL * 1024ULL;
 const int CHUNK_UNIT = 2048;
 const int FIXED_COUNT = 8;
+const string CLI_VERSION = "2.1.0";
 namespace fs = std::filesystem;
 
 string deriveCharset(size_t c) { return gCharBase.substr(0, c); }
@@ -1107,6 +1109,31 @@ string canonicalJson(const JsonObj& obj) {
     }
     out.push_back('}'); return out;
 }
+
+string jsonQ(const string& s) { return jsonEscape(s); }
+string jsonB(bool v) { return v ? "true" : "false"; }
+string jsonN(long long v) { return to_string(v); }
+string jsonU(unsigned long long v) { return to_string(v); }
+string jsonObj(const vector<pair<string,string>>& items) {
+    string out = "{";
+    for (size_t i = 0; i < items.size(); ++i) {
+        if (i) out.push_back(',');
+        out += jsonEscape(items[i].first);
+        out.push_back(':');
+        out += items[i].second;
+    }
+    out.push_back('}');
+    return out;
+}
+string jsonArrStr(const vector<string>& vals) {
+    string out = "[";
+    for (size_t i = 0; i < vals.size(); ++i) {
+        if (i) out.push_back(',');
+        out += jsonEscape(vals[i]);
+    }
+    out.push_back(']');
+    return out;
+}
 struct JsonParser {
     const string& s; size_t i = 0; JsonParser(const string& text) : s(text) {}
     void ws() { while (i < s.size() && isspace(static_cast<unsigned char>(s[i]))) ++i; }
@@ -1369,16 +1396,16 @@ bool verifySignature(const string& data, const string& signature, const string& 
 }
 
 vector<string> generateHashRange(const cpp_int& start, uint64_t hashes, int mode = 0, int count = 8, int directBits = 256, int laneBits = 336, int blockBytes = 4096, bool bare = false, bool showProgress = false, const string& label = "HASH") {
-    vector<string> out; out.reserve(static_cast<size_t>(hashes)); cpp_int cur = start; string curText = bare ? string() : decStr(start); auto started = chrono::steady_clock::now();
-    for (uint64_t i = 0; i < hashes; ++i) { string hash = generateKey(cur, mode, count, directBits, laneBits, blockBytes); if (bare) out.push_back(hash); else { out.push_back(curText + " = " + hash); incDecString(curText); } cur += 1; if (showProgress) printProgBar(label, i + 1, hashes, started); }
+    vector<string> out; out.reserve(static_cast<size_t>(hashes)); cpp_int cur = start; string curText = decStr(start); auto started = chrono::steady_clock::now();
+    for (uint64_t i = 0; i < hashes; ++i) { string hash = generateKey(curText, mode, count, directBits, laneBits, blockBytes); if (bare) out.push_back(hash); else out.push_back(curText + " = " + hash); cur += 1; incDecString(curText); if (showProgress) printProgBar(label, i + 1, hashes, started); }
     return out;
 }
 void writeHashRange(const string& path, const cpp_int& start, uint64_t hashes, int mode = 0, int count = 8, int directBits = 256, int laneBits = 336, int blockBytes = 4096, bool bare = false, bool showProgress = true, const string& label = "HASH") {
-    ofstream fp(path, ios::binary); if (!fp) throw runtime_error("failed to open output file: " + path); vector<char> ioBuf(1 << 20); fp.rdbuf()->pubsetbuf(ioBuf.data(), ioBuf.size()); cpp_int cur = start; string curText = bare ? string() : decStr(start); auto started = chrono::steady_clock::now();
-    for (uint64_t i = 0; i < hashes; ++i) { string hash = generateKey(cur, mode, count, directBits, laneBits, blockBytes); if (bare) fp << hash << '\n'; else { fp << curText << " = " << hash << '\n'; incDecString(curText); } if (!fp) throw runtime_error("failed while writing output file: " + path); cur += 1; if (showProgress) printProgBar(label, i + 1, hashes, started); }
+    ofstream fp(path, ios::binary); if (!fp) throw runtime_error("failed to open output file: " + path); vector<char> ioBuf(1 << 20); fp.rdbuf()->pubsetbuf(ioBuf.data(), ioBuf.size()); cpp_int cur = start; string curText = decStr(start); auto started = chrono::steady_clock::now();
+    for (uint64_t i = 0; i < hashes; ++i) { string hash = generateKey(curText, mode, count, directBits, laneBits, blockBytes); if (bare) fp << hash << '\n'; else fp << curText << " = " << hash << '\n'; if (!fp) throw runtime_error("failed while writing output file: " + path); cur += 1; incDecString(curText); if (showProgress) printProgBar(label, i + 1, hashes, started); }
 }
 void benchRange(const cpp_int& start, uint64_t hashes, int mode = 0, int count = 8, int directBits = 256, int laneBits = 336, int blockBytes = 4096) {
-    cpp_int cur = start; auto started = chrono::steady_clock::now(); string last; for (uint64_t i = 0; i < hashes; ++i) { last = generateKey(cur, mode, count, directBits, laneBits, blockBytes); cur += 1; } auto elapsed = chrono::duration_cast<chrono::duration<long double>>(chrono::steady_clock::now() - started).count(); long double rate = elapsed > 0 ? (static_cast<long double>(hashes) / elapsed) : 0.0L; cout << "hashes=" << hashes << '\n' << "elapsed=" << fixed << setprecision(6) << elapsed << '\n' << "hashesPerSec=" << fixed << setprecision(6) << rate << '\n' << "last=" << last << '\n';
+    cpp_int cur = start; string curText = decStr(start); auto started = chrono::steady_clock::now(); string last; for (uint64_t i = 0; i < hashes; ++i) { last = generateKey(curText, mode, count, directBits, laneBits, blockBytes); cur += 1; incDecString(curText); } auto elapsed = chrono::duration_cast<chrono::duration<long double>>(chrono::steady_clock::now() - started).count(); long double rate = elapsed > 0 ? (static_cast<long double>(hashes) / elapsed) : 0.0L; cout << "hashes=" << hashes << '\n' << "elapsed=" << fixed << setprecision(6) << elapsed << '\n' << "hashesPerSec=" << fixed << setprecision(6) << rate << '\n' << "last=" << last << '\n';
 }
 vector<cpp_int> makeBenchInputs(uint64_t hashes, bool randomInputs = true, int inputBits = 256, const cpp_int& start = 0) {
     vector<cpp_int> out; out.reserve(static_cast<size_t>(hashes));
@@ -1408,7 +1435,7 @@ shepAudit::HashBytes32 hashHexToBytes32(const string& hexIn) {
 }
 
 shepAudit::HashBytes32 shepAuditBytesForInput(const cpp_int& x, int mode = 0, int count = 8, int directBits = 256, int laneBits = 336, int blockBytes = 4096) {
-    string out = generateKey(x, mode, count, directBits, laneBits, blockBytes);
+    string out = generateKey(decStr(x), mode, count, directBits, laneBits, blockBytes);
     if (isHex64(out)) return hashHexToBytes32(out);
     string auditHex = lowerStr(deriveInternalKey(out, mode == 0 ? 0 : 333, count, "AUDIT"));
     return hashHexToBytes32(auditHex);
@@ -1439,7 +1466,7 @@ BenchSummary benchRun(uint64_t hashes, bool randomInputs = true, int inputBits =
     auto started = chrono::steady_clock::now();
     string last;
     for (uint64_t i = 0; i < hashes; ++i) {
-        last = generateKey(inputs[static_cast<size_t>(i)], mode, count, directBits, laneBits, blockBytes);
+        last = generateKey(decStr(inputs[static_cast<size_t>(i)]), mode, count, directBits, laneBits, blockBytes);
         if (showProgress) printProgBar("Benchmarking", i + 1, hashes, started);
     }
     auto elapsed = chrono::duration_cast<chrono::duration<long double>>(chrono::steady_clock::now() - started).count();
@@ -1497,9 +1524,8 @@ void printHelp(const char* exe) {
          << "  " << exe << " --decrypt-file PATH --key KEY [options]\n"
          << "  " << exe << " --body BODY --meta META --key KEY [options]\n\n"
          << "Hash inputs:\n"
-         << "  --text TEXT         Generate a SHEP64 or SHEP333 key from UTF-8 text\n"
-         << "  --value INT         Generate a SHEP64 or SHEP333 key from a decimal integer\n"
-         << "  --file PATH         Generate a SHEP64 or SHEP333 key from file contents\n"
+         << "  --text TEXT         Generate a SHEP32 or SHEP333 key from UTF-8 text\n"
+         << "  --file PATH         Generate a SHEP32 or SHEP333 key from file contents\n"
          << "  --start INT         Starting integer for range generation\n"
          << "  --hashes N          Number of keys to generate from --start\n"
          << "  --out PATH          Write range or cipher output to file\n\n"
@@ -1513,7 +1539,8 @@ void printHelp(const char* exe) {
          << "  --detached          Use detached meta/body format\n"
          << "  --meta META         Detached meta token or file path\n"
          << "  --body BODY         Detached body token or file path\n"
-         << "  --key KEY           Passphrase, primary key, or extended key\n"
+         << "  --key KEY           Explicit SHEP32 or SHEP333 key\n"
+         << "  --phrase TEXT       Explicit phrase, even if it looks like a key\n"
          << "  --keyfile PATH      Read a SHEP key from a .pkey file\n"
          << "  --write-key PATH    Save the resulting SHEP key to a .pkey file\n"
          << "  --quiet-key         Do not print the key token\n"
@@ -1531,10 +1558,7 @@ void printHelp(const char* exe) {
          << "  --verify TEXT       Verify UTF-8 text using --signature and --public-key\n"
          << "  --pair              Print the internal encryption key pair\n\n"
          << "General options:\n"
-         << "  --mode N            0 = SHEP64 primary, 1 = SHEP333 extended\n"
-         << "  --direct-bits N     Direct-route threshold bits (default 256)\n"
-         << "  --lane-bits N       Reserved compatibility option (default 336)\n"
-         << "  --block-bytes N     Reserved compatibility option (default 4096 or 65536 for files)\n"
+         << "  --mode N            0 = SHEP32 primary, 1 = SHEP333 extended\n"
          << "  --bare              Output only hashes in range mode\n"
          << "  --bench N           Benchmark N hashes; random inputs by default\n"
          << "  --input-bits N      Benchmark input width in 2..256 (default 128)\n"
@@ -1542,7 +1566,10 @@ void printHelp(const char* exe) {
          << "  --deep-audit        Include pair-dependence analysis in compare mode\n"
          << "  --top-count N       Top-cell count for compare mode (default 128)\n"
          << "  --audit-dir PATH    Write detailed audit TSV files to PATH\n"
-         << "  --help              Show this help\n";
+         << "  --json              Emit JSON instead of plain text when supported\n"
+         << "  --version           Show CLI version\n"
+         << "  --help              Show this help\n"
+         << "\nAdvanced compatibility flags such as --direct-bits, --lane-bits, and --block-bytes are still accepted but hidden from the regular help output.\n";
 }
 
 string readTextPath(const string& path) {
@@ -1695,12 +1722,12 @@ string maybeLoadTokenText(const string& value) {
 }
 
 string askKeySource(bool require, bool allowAuto = true) {
-    cout << "Key source: 1) direct key  2) passphrase  3) key file";
+    cout << "Key source: 1) explicit key  2) phrase  3) key file";
     if (allowAuto) cout << "  4) auto";
     cout << "\n> ";
     string choice; getline(cin, choice); choice = trimStr(choice);
     if (choice == "1") return trimStr(askLine("Key: "));
-    if (choice == "2") return askLine("Passphrase: ");
+    if (choice == "2") return askLine("Phrase: ");
     if (choice == "3") return loadKeyFile(trimStr(askLine("Key file path: ")));
     if (allowAuto && (choice.empty() || choice == "4")) return "";
     if (require) {
@@ -1733,7 +1760,7 @@ int interactiveMenu() {
         try {
             if (choice == "0" || choice == "10" || choice == "q" || choice == "quit" || choice == "exit") return 0;
             if (choice == "1") {
-                int mode = askInt("Mode 0=SHEP64, 1=SHEP333 [default 0]: ", 0);
+                int mode = askInt("Mode 0=SHEP32, 1=SHEP333 [default 0]: ", 0);
                 int count = FIXED_COUNT;
                 string kind = trimStr(askLine("Input type: 1) text  2) file [default 1]: "));
                 if (kind == "2") cout << generateKeyFile(trimStr(askLine("File path: ")), mode, count) << '\n';
@@ -1741,7 +1768,7 @@ int interactiveMenu() {
                 continue;
             }
             if (choice == "2") {
-                int mode = askInt("Mode 0=SHEP64, 1=SHEP333 [default 0]: ", 0);
+                int mode = askInt("Mode 0=SHEP32, 1=SHEP333 [default 0]: ", 0);
                 int count = FIXED_COUNT;
                 bool advanced = askYesNo("Advanced options? [y/N]: ", false);
                 bool detached = false, noCompress = false;
@@ -1822,7 +1849,7 @@ int interactiveMenu() {
                 continue;
             }
             if (choice == "3") {
-                string modeText = trimStr(askLine("Mode 0=SHEP64, 1=SHEP333, blank=auto: "));
+                string modeText = trimStr(askLine("Mode 0=SHEP32, 1=SHEP333, blank=auto: "));
                 int mode = modeText.empty() ? -1 : (stoi(modeText) == 0 ? 0 : 333);
                 int count = askDecryptCountOverride(mode);
                 bool advanced = askYesNo("Advanced options? [y/N]: ", false);
@@ -1874,7 +1901,7 @@ int interactiveMenu() {
                 continue;
             }
             if (choice == "4") {
-                int mode = askInt("Mode 0=SHEP64, 1=SHEP333 [default 0]: ", 0);
+                int mode = askInt("Mode 0=SHEP32, 1=SHEP333 [default 0]: ", 0);
                 int count = FIXED_COUNT;
                 string kind = trimStr(askLine("Generate source: 1) random  2) text  3) file [default 1]: "));
                 string out;
@@ -1886,12 +1913,12 @@ int interactiveMenu() {
                 if (!save.empty()) { writeKeyFilePath(save, out); cout << save << '\n'; }
                 continue;
             }
-            if (choice == "5") { int mode = askInt("Mode 0=SHEP64, 1=SHEP333 [default 0]: ", 0); int count = FIXED_COUNT; string keyIn = askKeySource(true, false); cout << generatePublicKey(keyIn, mode == 0 ? 0 : 333, count) << '\n'; continue; }
-            if (choice == "6") { int mode = askInt("Mode 0=SHEP64, 1=SHEP333 [default 0]: ", 0); int count = FIXED_COUNT; string keyIn = askKeySource(true, false); string text = askLine("Text to sign: "); SignResult sig = signData(text, keyIn, mode == 0 ? 0 : 333, count); cout << "signature=" << sig.signature << '\n' << "publicKey=" << sig.publicKey << '\n'; continue; }
+            if (choice == "5") { int mode = askInt("Mode 0=SHEP32, 1=SHEP333 [default 0]: ", 0); int count = FIXED_COUNT; string keyIn = askKeySource(true, false); cout << generatePublicKey(keyIn, mode == 0 ? 0 : 333, count) << '\n'; continue; }
+            if (choice == "6") { int mode = askInt("Mode 0=SHEP32, 1=SHEP333 [default 0]: ", 0); int count = FIXED_COUNT; string keyIn = askKeySource(true, false); string text = askLine("Text to sign: "); SignResult sig = signData(text, keyIn, mode == 0 ? 0 : 333, count); cout << "signature=" << sig.signature << '\n' << "publicKey=" << sig.publicKey << '\n'; continue; }
             if (choice == "7") { string text = askLine("Text to verify: "); string sig = maybeLoadTokenText(askLine("Signature token or file path: ")); string pub = maybeLoadTokenText(askLine("Public key token or file path: ")); cout << (verifySignature(text, sig, pub) ? "true" : "false") << '\n'; continue; }
-            if (choice == "8") { int mode = askInt("Mode 0=SHEP64, 1=SHEP333 [default 0]: ", 0); int count = FIXED_COUNT; cpp_int start = parseDec(trimStr(askLine("Start integer: "))); uint64_t hashes = parseU64(trimStr(askLine("How many hashes: ")), "hashes"); bool bare = askYesNo("Bare hashes only? [y/N]: ", false); auto lines = generateHashRange(start, hashes, mode, count, 256, 336, 4096, bare, false, "HASH"); for (const auto& line : lines) cout << line << '\n'; continue; }
+            if (choice == "8") { int mode = askInt("Mode 0=SHEP32, 1=SHEP333 [default 0]: ", 0); int count = FIXED_COUNT; cpp_int start = parseDec(trimStr(askLine("Start integer: "))); uint64_t hashes = parseU64(trimStr(askLine("How many hashes: ")), "hashes"); bool bare = askYesNo("Bare hashes only? [y/N]: ", false); auto lines = generateHashRange(start, hashes, mode, count, 256, 336, 4096, bare, false, "HASH"); for (const auto& line : lines) cout << line << '\n'; continue; }
             if (choice == "9") {
-                int mode = askInt("Mode 0=SHEP64, 1=SHEP333 [default 0]: ", 0);
+                int mode = askInt("Mode 0=SHEP32, 1=SHEP333 [default 0]: ", 0);
                 int count = FIXED_COUNT;
                 string benchType = trimStr(askLine("Benchmark type: 1) speed  2) speed + diffusion report [default 1]: "));
                 if (benchType.empty()) benchType = "1";
@@ -1950,12 +1977,11 @@ int interactiveMenu() {
 int main(int argc, char* argv[]) {
     try {
         if (argc == 1) return interactiveMenu();
-        bool hasText = false, hasValue = false, hasFile = false, hasStart = false, hasHashes = false, bare = false, showProgress = true, hasBench = false, doEncrypt = false, doEncryptFile = false, doDecrypt = false, doDecryptFile = false, doDetached = false, noCompress = false, doPubKey = false, doSign = false, doVerify = false, hasMeta = false, hasBody = false, hasKey = false, hasKeyFile = false, hasSignature = false, hasPublicKey = false, hasWriteKey = false, doPair = false, asText = false, quietKey = false, noLimit = false, useStdin = false, benchCompare = false, benchRandomInputs = true;
-        string textValue, filePath, delim; cpp_int valueInt = 0, startValue = 0; uint64_t hashes = 0, benchCount = 0; string outPath; string encryptText, encryptFilePath, decryptToken, decryptFilePath, metaToken, bodyToken, keyText, keyFilePath, writeKeyPath, signText, verifyText, signatureText, publicKeyText; int mode = 0, count = FIXED_COUNT, directBits = 256, laneBits = 336, blockBytes = 4096, chunkSizeUnits = 1, chunkBytesArg = -1, powBits = 0, inputBits = 128; string powStart = "0"; bool benchDeepAudit = false; size_t benchTopCount = 128; string benchAuditDir;
+        bool hasText = false, hasFile = false, hasStart = false, hasHashes = false, bare = false, showProgress = true, hasBench = false, doEncrypt = false, doEncryptFile = false, doDecrypt = false, doDecryptFile = false, doDetached = false, noCompress = false, doPubKey = false, doSign = false, doVerify = false, hasMeta = false, hasBody = false, hasKey = false, hasPhrase = false, hasKeyFile = false, hasSignature = false, hasPublicKey = false, hasWriteKey = false, doPair = false, asText = false, quietKey = false, noLimit = false, useStdin = false, benchCompare = false, benchRandomInputs = true, jsonMode = false;
+        string textValue, filePath, delim; cpp_int startValue = 0; uint64_t hashes = 0, benchCount = 0; string outPath; string encryptText, encryptFilePath, decryptToken, decryptFilePath, metaToken, bodyToken, keyText, keyFilePath, writeKeyPath, signText, verifyText, signatureText, publicKeyText; int mode = 0, count = FIXED_COUNT, directBits = 256, laneBits = 336, blockBytes = 4096, chunkSizeUnits = 1, chunkBytesArg = -1, powBits = 0, inputBits = 128; string powStart = "0"; bool benchDeepAudit = false; size_t benchTopCount = 128; string benchAuditDir;
         for (int i = 1; i < argc; ++i) {
             string arg = argv[i]; auto need = [&](const string& name) -> string { if (i + 1 >= argc || string(argv[i + 1]).rfind("--", 0) == 0) throw runtime_error("missing value for " + name); return string(argv[++i]); };
             if (arg == "--text") { hasText = true; textValue = need(arg); }
-            else if (arg == "--value") { hasValue = true; valueInt = parseDec(need(arg)); }
             else if (arg == "--file") { hasFile = true; filePath = need(arg); }
             else if (arg == "--stdin") useStdin = true;
             else if (arg == "--delim") delim = need(arg);
@@ -1978,6 +2004,7 @@ int main(int argc, char* argv[]) {
             else if (arg == "--meta") { hasMeta = true; metaToken = need(arg); }
             else if (arg == "--body") { hasBody = true; bodyToken = need(arg); }
             else if (arg == "--key") { hasKey = true; keyText = need(arg); }
+            else if (arg == "--phrase") { hasPhrase = true; keyText = need(arg); }
             else if (arg == "--keyfile") { hasKeyFile = true; keyFilePath = need(arg); }
             else if (arg == "--write-key") { hasWriteKey = true; writeKeyPath = need(arg); }
             else if (arg == "--no-compress") noCompress = true;
@@ -2000,12 +2027,16 @@ int main(int argc, char* argv[]) {
             else if (arg == "--audit-dir") benchAuditDir = need(arg);
             else if (arg == "--sequential") benchRandomInputs = false;
             else if (arg == "--random-inputs") benchRandomInputs = true;
+            else if (arg == "--json") jsonMode = true;
+            else if (arg == "--version") { cout << argv[0] << " " << CLI_VERSION << "\n"; return 0; }
             else if (arg == "--help" || arg == "-h") { printHelp(argv[0]); return 0; }
             else throw runtime_error("unknown argument: " + arg);
         }
 
-        if (hasKey && hasKeyFile) throw runtime_error("provide only one of --key or --keyfile");
+        int keySourceCount = (hasKey ? 1 : 0) + (hasPhrase ? 1 : 0) + (hasKeyFile ? 1 : 0);
+        if (keySourceCount > 1) throw runtime_error("provide only one of --key, --phrase, or --keyfile");
         if (hasKeyFile) keyText = loadKeyFile(keyFilePath), hasKey = true;
+        else if (hasPhrase) hasKey = true;
         if (mode != 0 && mode != 1 && mode != 333) throw runtime_error("--mode must be 0 or 1");
         if (directBits < 1) throw runtime_error("--direct-bits must be >= 1");
         if (powBits < 0) throw runtime_error("--pow-bits must be >= 0");
@@ -2015,49 +2046,54 @@ int main(int argc, char* argv[]) {
         if (doPair) {
             int pairMode = mode == 0 ? 0 : 333; string master;
             if (hasFile) master = generateKeyFile(filePath, pairMode == 0 ? 0 : 1, count, directBits, laneBits, blockBytes);
-            else if (hasValue) master = generateKey(valueInt, pairMode == 0 ? 0 : 1, count, directBits, laneBits, blockBytes);
             else if (hasText) master = generateKey(textValue, pairMode == 0 ? 0 : 1, count, directBits, laneBits, blockBytes);
-            else throw runtime_error("--pair requires --text, --value, or --file");
+            else throw runtime_error("--pair requires --text or --file");
             auto pair = computeKeyPair(master, pairMode, count);
-            cout << "key1=" << pair.key1 << '\n' << "key2=" << pair.key2 << '\n' << "schedText=" << pair.schedText << '\n' << "mixHex=" << pair.mixHex << '\n' << "remix=" << pair.remix << '\n';
+            if (jsonMode) cout << jsonObj({{"ok", jsonB(true)}, {"mode", jsonQ("pair")}, {"key1", jsonQ(pair.key1)}, {"key2", jsonQ(pair.key2)}, {"schedText", jsonQ(pair.schedText)}, {"mixHex", jsonQ(pair.mixHex)}, {"remix", jsonQ(pair.remix)}}) << '\n';
+            else cout << "key1=" << pair.key1 << '\n' << "key2=" << pair.key2 << '\n' << "schedText=" << pair.schedText << '\n' << "mixHex=" << pair.mixHex << '\n' << "remix=" << pair.remix << '\n';
             return 0;
         }
         if (doPubKey) {
             if (!hasKey) throw runtime_error("--key or --keyfile is required for --pubkey");
-            cout << generatePublicKey(keyText, mode == 0 ? 0 : 333, count) << '\n';
+            string pub = generatePublicKey(keyText, mode == 0 ? 0 : 333, count);
+            if (jsonMode) cout << jsonObj({{"ok", jsonB(true)}, {"mode", jsonQ("pubkey")}, {"publicKey", jsonQ(pub)}}) << '\n';
+            else cout << pub << '\n';
             return 0;
         }
         if (doSign) {
             if (!hasKey) throw runtime_error("--key or --keyfile is required for --sign");
             string payload = useStdin ? readStdinPayload(delim) : signText;
             SignResult sig = signData(payload, keyText, mode == 0 ? 0 : 333, count);
-            cout << "signature=" << sig.signature << '\n' << "publicKey=" << sig.publicKey << '\n';
+            if (jsonMode) cout << jsonObj({{"ok", jsonB(true)}, {"mode", jsonQ("sign")}, {"signature", jsonQ(sig.signature)}, {"publicKey", jsonQ(sig.publicKey)}}) << '\n';
+            else cout << "signature=" << sig.signature << '\n' << "publicKey=" << sig.publicKey << '\n';
             return 0;
         }
         if (doVerify) {
             if (!hasSignature || !hasPublicKey) throw runtime_error("--signature and --public-key are required for --verify");
             string payload = useStdin ? readStdinPayload(delim) : verifyText;
-            cout << (verifySignature(payload, maybeLoadTokenText(signatureText), maybeLoadTokenText(publicKeyText)) ? "true" : "false") << '\n';
+            bool ok = verifySignature(payload, maybeLoadTokenText(signatureText), maybeLoadTokenText(publicKeyText));
+            if (jsonMode) cout << jsonObj({{"ok", jsonB(true)}, {"mode", jsonQ("verify")}, {"valid", jsonB(ok)}}) << '\n';
+            else cout << (ok ? "true" : "false") << '\n';
             return 0;
         }
 
         if (doEncryptFile || (doEncrypt && hasFile)) {
             string src = doEncryptFile ? encryptFilePath : filePath; validateFileCap(src, noLimit); const string* keyPtr = hasKey ? &keyText : nullptr; string payload = packFilePayload(src, readFileBytes(src)); EncryptResult res = encryptData(payload, keyPtr, mode == 0 ? 0 : 333, count, doDetached, !noCompress, chunkBytes, powBits, powStart, "", "", "", showProgress, "Encrypting");
             if (doDetached) {
-                string base = outPath.empty() ? fs::path(src).replace_extension("").string() : outPath; string bodyPath = defaultDetachedBodyPath(base), metaPath = defaultDetachedMetaPath(base); writeTextPath(bodyPath, res.body); writeTextPath(metaPath, res.meta); string keyPath = hasWriteKey ? writeKeyPath : defaultDetachedKeyPath(base); writeKeyFilePath(keyPath, res.key); cout << bodyPath << '\n' << metaPath << '\n' << keyPath << '\n'; if (!quietKey) cout << res.key << '\n';
+                string base = outPath.empty() ? fs::path(src).replace_extension("").string() : outPath; string bodyPath = defaultDetachedBodyPath(base), metaPath = defaultDetachedMetaPath(base); writeTextPath(bodyPath, res.body); writeTextPath(metaPath, res.meta); string keyPath = hasWriteKey ? writeKeyPath : defaultDetachedKeyPath(base); writeKeyFilePath(keyPath, res.key); if (jsonMode) cout << jsonObj({{"ok", jsonB(true)}, {"mode", jsonQ("enc")}, {"detached", jsonB(true)}, {"body_out", jsonQ(bodyPath)}, {"meta_out", jsonQ(metaPath)}, {"key_out", jsonQ(keyPath)}, {"key", jsonQ(quietKey ? string("") : res.key)}, {"chunk_bytes", jsonN(chunkBytes)}}) << '\n'; else { cout << bodyPath << '\n' << metaPath << '\n' << keyPath << '\n'; if (!quietKey) cout << res.key << '\n'; }
             } else {
-                string cipherPath = outPath.empty() ? defaultEncOutPath(src) : ensureExtPath(outPath, ".sh32", "cipher.sh32"); writeTextPath(cipherPath, res.cipher); string keyPath = hasWriteKey ? writeKeyPath : defaultKeyOutPath(cipherPath); writeKeyFilePath(keyPath, res.key); cout << cipherPath << '\n' << keyPath << '\n'; if (!quietKey) cout << res.key << '\n';
+                string cipherPath = outPath.empty() ? defaultEncOutPath(src) : ensureExtPath(outPath, ".sh32", "cipher.sh32"); writeTextPath(cipherPath, res.cipher); string keyPath = hasWriteKey ? writeKeyPath : defaultKeyOutPath(cipherPath); writeKeyFilePath(keyPath, res.key); if (jsonMode) cout << jsonObj({{"ok", jsonB(true)}, {"mode", jsonQ("enc")}, {"detached", jsonB(false)}, {"out", jsonQ(cipherPath)}, {"key_out", jsonQ(keyPath)}, {"key", jsonQ(quietKey ? string("") : res.key)}, {"chunk_bytes", jsonN(chunkBytes)}}) << '\n'; else { cout << cipherPath << '\n' << keyPath << '\n'; if (!quietKey) cout << res.key << '\n'; }
             }
             return 0;
         }
         if (doEncrypt) {
             const string* keyPtr = hasKey ? &keyText : nullptr; string payload = useStdin ? readStdinPayload(delim) : encryptText; EncryptResult res = encryptData(payload, keyPtr, mode == 0 ? 0 : 333, count, doDetached, !noCompress, chunkBytes, powBits, powStart, "", "", "", showProgress, "Encrypting");
             if (doDetached) {
-                if (!outPath.empty()) { string bodyPath = defaultDetachedBodyPath(outPath), metaPath = defaultDetachedMetaPath(outPath); writeTextPath(bodyPath, res.body); writeTextPath(metaPath, res.meta); string keyPath = hasWriteKey ? writeKeyPath : defaultDetachedKeyPath(outPath); writeKeyFilePath(keyPath, res.key); cout << bodyPath << '\n' << metaPath << '\n' << keyPath << '\n'; }
-                else { cout << "meta=" << res.meta << '\n' << "body=" << res.body << '\n'; if (hasWriteKey) { writeKeyFilePath(writeKeyPath, res.key); cout << writeKeyPath << '\n'; } else if (!quietKey) cout << res.key << '\n'; }
+                if (!outPath.empty()) { string bodyPath = defaultDetachedBodyPath(outPath), metaPath = defaultDetachedMetaPath(outPath); writeTextPath(bodyPath, res.body); writeTextPath(metaPath, res.meta); string keyPath = hasWriteKey ? writeKeyPath : defaultDetachedKeyPath(outPath); writeKeyFilePath(keyPath, res.key); if (jsonMode) cout << jsonObj({{"ok", jsonB(true)}, {"mode", jsonQ("enc")}, {"detached", jsonB(true)}, {"body_out", jsonQ(bodyPath)}, {"meta_out", jsonQ(metaPath)}, {"key_out", jsonQ(keyPath)}, {"chunk_bytes", jsonN(chunkBytes)}}) << '\n'; else cout << bodyPath << '\n' << metaPath << '\n' << keyPath << '\n'; }
+                else { if (jsonMode) cout << jsonObj({{"ok", jsonB(true)}, {"mode", jsonQ("enc")}, {"detached", jsonB(true)}, {"body", jsonQ(res.body)}, {"meta", jsonQ(res.meta)}, {"key", jsonQ(quietKey ? string("") : res.key)}, {"key_out", jsonQ(hasWriteKey ? writeKeyPath : string(""))}, {"chunk_bytes", jsonN(chunkBytes)}}) << '\n'; else { cout << "meta=" << res.meta << '\n' << "body=" << res.body << '\n'; if (hasWriteKey) { writeKeyFilePath(writeKeyPath, res.key); cout << writeKeyPath << '\n'; } else if (!quietKey) cout << res.key << '\n'; } }
             } else {
-                if (!outPath.empty()) { string cipherPath = ensureExtPath(outPath, ".sh32", "cipher.sh32"); writeTextPath(cipherPath, res.cipher); string keyPath = hasWriteKey ? writeKeyPath : defaultKeyOutPath(cipherPath); writeKeyFilePath(keyPath, res.key); cout << cipherPath << '\n' << keyPath << '\n'; }
-                else { cout << res.cipher << '\n'; if (hasWriteKey) { writeKeyFilePath(writeKeyPath, res.key); cout << writeKeyPath << '\n'; } else if (!quietKey) cout << res.key << '\n'; }
+                if (!outPath.empty()) { string cipherPath = ensureExtPath(outPath, ".sh32", "cipher.sh32"); writeTextPath(cipherPath, res.cipher); string keyPath = hasWriteKey ? writeKeyPath : defaultKeyOutPath(cipherPath); writeKeyFilePath(keyPath, res.key); if (jsonMode) cout << jsonObj({{"ok", jsonB(true)}, {"mode", jsonQ("enc")}, {"detached", jsonB(false)}, {"out", jsonQ(cipherPath)}, {"key_out", jsonQ(keyPath)}, {"chunk_bytes", jsonN(chunkBytes)}}) << '\n'; else cout << cipherPath << '\n' << keyPath << '\n'; }
+                else { if (jsonMode) cout << jsonObj({{"ok", jsonB(true)}, {"mode", jsonQ("enc")}, {"detached", jsonB(false)}, {"cipher", jsonQ(res.cipher)}, {"key", jsonQ(quietKey ? string("") : res.key)}, {"key_out", jsonQ(hasWriteKey ? writeKeyPath : string(""))}, {"chunk_bytes", jsonN(chunkBytes)}}) << '\n'; else { cout << res.cipher << '\n'; if (hasWriteKey) { writeKeyFilePath(writeKeyPath, res.key); cout << writeKeyPath << '\n'; } else if (!quietKey) cout << res.key << '\n'; } }
             }
             return 0;
         }
@@ -2073,9 +2109,9 @@ int main(int argc, char* argv[]) {
                 string token = useStdin ? readStdinPayload(delim) : decryptToken; pt = decryptDataEx(token, keyText, decMode, count, nullptr, showProgress, "Decrypting");
             }
             string restoredName; vector<uint8_t> restoredData;
-            if (!asText && unpackFilePayload(pt, restoredName, restoredData)) { string target = outPath.empty() ? restoredName : outPath; writeBinPath(target, restoredData); cout << target << '\n'; }
-            else if (!outPath.empty()) { writeTextPath(outPath, pt); cout << outPath << '\n'; }
-            else { cout << pt << '\n'; }
+            if (!asText && unpackFilePayload(pt, restoredName, restoredData)) { string target = outPath.empty() ? restoredName : outPath; writeBinPath(target, restoredData); if (jsonMode) cout << jsonObj({{"ok", jsonB(true)}, {"mode", jsonQ("dec")}, {"out", jsonQ(target)}, {"restored_name", jsonQ(restoredName)}}) << '\n'; else cout << target << '\n'; }
+            else if (!outPath.empty()) { writeTextPath(outPath, pt); if (jsonMode) cout << jsonObj({{"ok", jsonB(true)}, {"mode", jsonQ("dec")}, {"out", jsonQ(outPath)}}) << '\n'; else cout << outPath << '\n'; }
+            else { if (jsonMode) cout << jsonObj({{"ok", jsonB(true)}, {"mode", jsonQ("dec")}, {"text", jsonQ(pt)}}) << '\n'; else cout << pt << '\n'; }
             return 0;
         }
         if (hasBench) {
@@ -2085,7 +2121,9 @@ int main(int argc, char* argv[]) {
                 writeBenchReport(outPath, sum);
                 cout << outPath << "\n";
             } else {
-                cout << "hashes=" << sum.hashes << "\n"
+                if (jsonMode) {
+                    cout << jsonObj({{"ok", jsonB(true)}, {"mode", jsonQ("bench")}, {"hashes", jsonU(sum.hashes)}, {"elapsed", jsonQ(to_string(sum.elapsed))}, {"hashesPerSec", jsonQ(to_string(sum.hashesPerSec))}, {"last", jsonQ(sum.last)}, {"randomInputs", jsonB(sum.randomInputs)}, {"inputBits", jsonN(sum.inputBits)}}) << "\n";
+                } else cout << "hashes=" << sum.hashes << "\n"
                      << "elapsed=" << fixed << setprecision(6) << sum.elapsed << "\n"
                      << "hashesPerSec=" << fixed << setprecision(6) << sum.hashesPerSec << "\n"
                      << "last=" << sum.last << "\n"
@@ -2100,14 +2138,13 @@ int main(int argc, char* argv[]) {
         if (hasStart || hasHashes || !outPath.empty()) {
             if (!hasStart) throw runtime_error("--start is required for range mode");
             if (!hasHashes) throw runtime_error("--hashes is required for range mode");
-            if (outPath.empty()) { auto lines = generateHashRange(startValue, hashes, mode, count, directBits, laneBits, blockBytes, bare, false, "HASH"); for (const auto& line : lines) cout << line << '\n'; }
-            else writeHashRange(outPath, startValue, hashes, mode, count, directBits, laneBits, blockBytes, bare, showProgress, "HASH");
+            if (outPath.empty()) { auto lines = generateHashRange(startValue, hashes, mode, count, directBits, laneBits, blockBytes, bare, false, "HASH"); if (jsonMode) cout << jsonObj({{"ok", jsonB(true)}, {"mode", jsonQ("range")}, {"start", jsonQ(decStr(startValue))}, {"hashes", jsonU(hashes)}, {"bare", jsonB(bare)}, {"lines", jsonArrStr(lines)}}) << '\n'; else for (const auto& line : lines) cout << line << '\n'; }
+            else { writeHashRange(outPath, startValue, hashes, mode, count, directBits, laneBits, blockBytes, bare, showProgress, "HASH"); if (jsonMode) cout << jsonObj({{"ok", jsonB(true)}, {"mode", jsonQ("range")}, {"out", jsonQ(outPath)}, {"start", jsonQ(decStr(startValue))}, {"hashes", jsonU(hashes)}, {"bare", jsonB(bare)}}) << '\n'; }
             return 0;
         }
-        if (hasFile) { cout << generateKeyFile(filePath, mode, count, directBits, laneBits, 65536) << '\n'; return 0; }
-        if (hasText) { cout << generateKey(textValue, mode, count, directBits, laneBits, blockBytes) << '\n'; return 0; }
-        if (hasValue) { cout << generateKey(valueInt, mode, count, directBits, laneBits, blockBytes) << '\n'; return 0; }
-        cout << generateKey(mode, count, directBits, laneBits, blockBytes) << '\n';
+        if (hasFile) { string key = generateKeyFile(filePath, mode, count, directBits, laneBits, 65536); if (jsonMode) cout << jsonObj({{"ok", jsonB(true)}, {"mode", jsonQ("hash")}, {"value", jsonQ(key)}}) << '\n'; else cout << key << '\n'; return 0; }
+        if (hasText) { string key = generateKey(textValue, mode, count, directBits, laneBits, blockBytes); if (jsonMode) cout << jsonObj({{"ok", jsonB(true)}, {"mode", jsonQ("hash")}, {"value", jsonQ(key)}}) << '\n'; else cout << key << '\n'; return 0; }
+        string key = generateKey(mode, count, directBits, laneBits, blockBytes); if (jsonMode) cout << jsonObj({{"ok", jsonB(true)}, {"mode", jsonQ("key")}, {"key", jsonQ(key)}}) << '\n'; else cout << key << '\n';
         return 0;
     } catch (const exception& e) {
         cerr << "error: " << e.what() << '\n';

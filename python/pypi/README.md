@@ -12,6 +12,13 @@
 - Range generation and benchmark commands
 - Interactive CLI mode
 
+## Unified naming and CLI notes
+
+- Use **SHEP32** for the primary format.
+- Use **SHEP333** for the extended format.
+- Use `--phrase` for phrases and `--key` for explicit keys.
+- Advanced compatibility flags such as `--direct-bits`, `--lane-bits`, and `--block-bytes` are still accepted but are hidden from regular help output.
+
 ## Key formats
 
 - **SHEP32** is the standard key format. It is a **32-byte** key, typically represented as a **64-character hexadecimal string**.
@@ -31,11 +38,7 @@ After installation, the main command is:
 shep32 --help
 ```
 
-Alternatively, you may use pyshep in place of shep32
-
-```bash
-pyshep --help
-```
+Older builds may also expose `pyshep` as a compatibility alias.
 
 Open the interactive menu:
 
@@ -55,12 +58,6 @@ Generate a deterministic SHEP32 key from text:
 
 ```bash
 shep32 hash --text "hello"
-```
-
-Generate a deterministic SHEP32 key from an integer:
-
-```bash
-shep32 hash --value 12345
 ```
 
 Generate a SHEP333 key:
@@ -95,7 +92,7 @@ shep32 enc --text "secret" --phrase "1234" --mode 1
 
 
 ```bash
-shep32 enc --text "secret" --passphrase "1234" --mode 1
+shep32 enc --text "secret" --phrase "1234" --mode 1
 ```
 
 Encrypt a file:
@@ -184,10 +181,6 @@ ok = verifySignature("message", sig["signature"], sig["publicKey"])
 
 ## CLI
 
-```bash
-pip install shep32
-```
-
 The Python package installs the `shep32` command-line interface.
 
 ### Python API example
@@ -228,11 +221,11 @@ SHEP CLI — SHEP32 keys and SHEP333 extended keys
 positional arguments:
   {start,key,hash,range,bench,pair,enc,dec,pubkey,sign,verify}
     start               Open the interactive menu
-    key                 Generate a fresh random key or derive one from text, integer, file, or phrase input
-    hash                Deterministically derive a SHEP32 or SHEP333 key from text, integer, or file input
+    key                 Generate a fresh random key or derive one from text, file, or phrase input
+    hash                Deterministically derive a SHEP32 or SHEP333 key from text or file input
     range               Generate a range of SHEP32 or SHEP333 keys from a starting integer
     bench               Benchmark key generation speed and optional diffusion report
-    pair                Show the two internal 256-bit encryption keys derived from a key or source
+    pair                Show the two internal 256-bit encryption keys derived from a key or text/file source
     enc                 Encrypt text or a file into a .sh32 token
     dec                 Decrypt a .sh32 token, detached body/meta tokens, or a token file
     pubkey              Derive an Ed25519 public key from a SHEP key source
@@ -260,14 +253,13 @@ shep32
 
 ### `key`
 
-Generates a fresh random key, or derives one from text, integer, file, or phrase input.
+Generates a fresh random key, or derives one from text, file, or phrase input.
 
 Examples:
 
 ```bash
 shep32 key
 shep32 key --text "hello"
-shep32 key --value 12345
 shep32 key --file ./data.bin
 shep32 key --phrase "passphrase"
 shep32 key --mode 1 --text "hello"
@@ -275,7 +267,8 @@ shep32 key --mode 1 --text "hello"
 
 Main options:
 
-- `--text`, `--value`, `--file`, `--phrase`: choose the key source
+- `--text`, `--file`, `--phrase`: choose the key source
+- numeric-looking inputs must still be passed with `--text` to preserve leading zeros
 - `--mode 0|1`: SHEP32 or SHEP333
 - `--save PATH`: write a `.pkey` file
 - `--json`: emit structured output
@@ -298,7 +291,6 @@ shep32 hash --mode 1 --text "hello"
 Main options:
 
 - `--text TEXT`
-- `--value INT`
 - `--file PATH`
 - `--mode 0|1`
 - `--direct-bits N`
@@ -370,7 +362,6 @@ Examples:
 
 ```bash
 shep32 pair --text "hello"
-shep32 pair --value 12345
 shep32 pair --file ./notes.txt
 shep32 pair --mode 1 --text "hello"
 ```

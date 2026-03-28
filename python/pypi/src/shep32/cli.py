@@ -18,7 +18,7 @@ except Exception:
         from core import *
         from core import _printProg
 
-CLI_VERSION = "2.0.2"
+CLI_VERSION = "2.1.0"
 
 DOC_EXTS = {".pdf", ".doc", ".docx", ".txt", ".rtf", ".odt", ".md", ".csv", ".xls", ".xlsx", ".json", ".tsv", ".bin"}
 KEY_HEADER = "-----BEGIN SHEP KEY-----\n"
@@ -63,8 +63,8 @@ def parseKeyFileText(text):
     wrappers = [
         (KEY_HEADER.strip(), KEY_FOOTER.strip()),
         ("-----BEGIN SHEP KEY-----", "-----END SHEP KEY-----"),
+        ("-----BEGIN SHEP32 KEY-----", "-----END SHEP32 KEY-----"),
         ("-----BEGIN SHEP64 KEY-----", "-----END SHEP64 KEY-----"),
-        ("-----BEGIN SHEP333 KEY-----", "-----END SHEP333 KEY-----"),
         ("-----BEGIN SHEP333 KEY-----", "-----END SHEP333 KEY-----"),
     ]
     for head, foot in wrappers:
@@ -230,7 +230,7 @@ def keyInputHelp():
         "  --keyfile  file containing an explicit SHEP32 or SHEP333 key\n"
         "\n"
         "Mode rules:\n"
-        "  --mode 0   SHEP32 / 32-byte / 64-hex mode\n"
+        "  --mode 0   SHEP32 primary mode\n"
         "  --mode 1   SHEP333 extended mode\n"
         "\n"
         "Examples:\n"
@@ -458,7 +458,7 @@ def generateHashRange(start, hashes, mode=0, count=8, directBits=256, laneBits=3
     cur = int(start)
     started = time.perf_counter()
     for i in range(int(hashes)):
-        h = generateKey(cur, mode, count, directBits, laneBits, blockBytes)
+        h = generateKey(str(cur), mode, count, directBits, laneBits, blockBytes)
         out.append(h if bare else f"{cur} = {h}")
         cur += 1
         if showProgress:
@@ -470,7 +470,7 @@ def writeHashRange(path, start, hashes, mode=0, count=8, directBits=256, laneBit
         cur = int(start)
         started = time.perf_counter()
         for i in range(int(hashes)):
-            h = generateKey(cur, mode, count, directBits, laneBits, blockBytes)
+            h = generateKey(str(cur), mode, count, directBits, laneBits, blockBytes)
             fp.write((h if bare else f"{cur} = {h}") + "\n")
             cur += 1
             if showProgress:
@@ -504,7 +504,7 @@ def benchSpeed(inputs, mode=0, count=8, directBits=256, laneBits=336, blockBytes
     hashList = []
     total = len(inputs)
     for i, x in enumerate(inputs, 1):
-        last = generateKey(x, mode, count, directBits, laneBits, blockBytes)
+        last = generateKey(str(x), mode, count, directBits, laneBits, blockBytes)
         hashList.append(last)
         if showProgress:
             _printProg(label, i, total)
@@ -519,7 +519,7 @@ def benchCompare(inputs, mode=0, count=8, directBits=256, laneBits=336, blockByt
     shepBase = []
     shaBase = []
     for x in inputs:
-        shepBase.append(generateKey(x, mode, count, directBits, laneBits, blockBytes))
+        shepBase.append(generateKey(str(x), mode, count, directBits, laneBits, blockBytes))
         done += 1
         if showProgress: _printProg(label, done, total)
     for x in inputs:
@@ -532,7 +532,7 @@ def benchCompare(inputs, mode=0, count=8, directBits=256, laneBits=336, blockByt
     for bit in range(int(testedBits)):
         mask = 1 << bit
         for i, x in enumerate(inputs):
-            shepFlip += meanFlipRate(shepBase[i], generateKey(x ^ mask, mode, count, directBits, laneBits, blockBytes))
+            shepFlip += meanFlipRate(shepBase[i], generateKey(str(x ^ mask), mode, count, directBits, laneBits, blockBytes))
             done += 1
             if showProgress: _printProg(label, done, total)
         for i, x in enumerate(inputs):
@@ -609,8 +609,6 @@ def cmdKey(args):
     mode = normalizeMode(args.mode, default=0)
     if args.file:
         k = _fileHash(args.file, mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
-    elif args.value is not None:
-        k = generateKey(int(args.value), mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
     elif args.text is not None:
         k = generateKey(args.text, mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
     elif args.phrase is not None:
@@ -631,8 +629,6 @@ def cmdHash(args):
     mode = normalizeMode(args.mode, default=0)
     if args.file:
         out = _fileHash(args.file, mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
-    elif args.value is not None:
-        out = generateKey(int(args.value), mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
     else:
         out = generateKey(args.text, mode, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
     if args.json:
@@ -661,8 +657,6 @@ def cmdPair(args):
     keyMode = 0 if mode == 0 else 333
     if args.file:
         master = _fileHash(args.file, 0 if keyMode == 0 else 1, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
-    elif args.value is not None:
-        master = generateKey(int(args.value), 0 if keyMode == 0 else 1, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
     else:
         master = generateKey(args.text, 0 if keyMode == 0 else 1, FIXED_COUNT, args.direct_bits, args.lane_bits, args.block_bytes)
     pair = computeKeyPair(master, keyMode, FIXED_COUNT)
@@ -878,10 +872,9 @@ def interactiveWizard():
             if choice == "4":
                 mode = promptMode(0)
                 count = FIXED_COUNT
-                kind = input("Source: 1) random  2) text  3) integer  4) file : ").strip()
+                kind = input("Source: 1) random  2) text  3) file : ").strip()
                 if kind == "2": k = generateKey(input("Text: "), mode, count)
-                elif kind == "3": k = generateKey(int(input("Integer value: ").strip()), mode, count)
-                elif kind == "4":
+                elif kind == "3":
                     fp = wizardPickExistingPath(input("File path: "), label="File")
                     if not fp: continue
                     k = generateKeyFile(fp, mode, count)
@@ -1106,10 +1099,10 @@ def buildParser():
     sub.add_parser("start", help="Open the interactive menu")
 
     def addModeArgs(p, default=0, allowAuto=False):
-        p.add_argument("--mode", type=int, default=(None if allowAuto else default), help="0 = SHEP32 primary (32 bytes / 64 hex), 1 = SHEP333 extended")
-        p.add_argument("--direct-bits", dest="direct_bits", type=int, default=256)
-        p.add_argument("--lane-bits", dest="lane_bits", type=int, default=336)
-        p.add_argument("--block-bytes", dest="block_bytes", type=int, default=4096)
+        p.add_argument("--mode", type=int, default=(None if allowAuto else default), help="0 = SHEP32 primary, 1 = SHEP333 extended")
+        p.add_argument("--direct-bits", dest="direct_bits", type=int, default=256, help=argparse.SUPPRESS)
+        p.add_argument("--lane-bits", dest="lane_bits", type=int, default=336, help=argparse.SUPPRESS)
+        p.add_argument("--block-bytes", dest="block_bytes", type=int, default=4096, help=argparse.SUPPRESS)
 
     def addChunkArgs(p):
         p.add_argument("--chunk-size", dest="chunk_size", type=int, default=1, help=f"Chunk units of {CHUNK_UNIT} bytes (default 1)")
@@ -1123,20 +1116,18 @@ def buildParser():
         addModeArgs(p, default=0, allowAuto=allowAutoMode)
         p.epilog = keyInputHelp()
 
-    pk = sub.add_parser("key", help="Generate a fresh random key or derive one from text, integer, file, or phrase input", formatter_class=CliFmt)
+    pk = sub.add_parser("key", help="Generate a fresh random key or derive one from text, file, or phrase input", formatter_class=CliFmt)
     g = pk.add_mutually_exclusive_group(required=False)
     g.add_argument("--text", default=None)
-    g.add_argument("--value", default=None)
     g.add_argument("--file", default=None)
     g.add_argument("--phrase", "-p", default=None)
     addModeArgs(pk)
     pk.add_argument("--save", default=None)
     pk.add_argument("--json", action="store_true")
 
-    ph = sub.add_parser("hash", help="Deterministically derive a SHEP32 or SHEP333 key from text, integer, or file input", formatter_class=CliFmt)
+    ph = sub.add_parser("hash", help="Deterministically derive a SHEP32 or SHEP333 key from text or file input", formatter_class=CliFmt)
     g = ph.add_mutually_exclusive_group(required=True)
     g.add_argument("--text", default=None)
-    g.add_argument("--value", default=None)
     g.add_argument("--file", default=None)
     addModeArgs(ph)
     ph.add_argument("--json", action="store_true")
@@ -1162,10 +1153,9 @@ def buildParser():
     pb.add_argument("--no-progress", dest="no_progress", action="store_true")
     addModeArgs(pb)
 
-    pp = sub.add_parser("pair", help="Show the two internal 256-bit encryption keys derived from a key or source", formatter_class=CliFmt)
+    pp = sub.add_parser("pair", help="Show the two internal 256-bit encryption keys derived from a key or text/file source", formatter_class=CliFmt)
     g = pp.add_mutually_exclusive_group(required=True)
     g.add_argument("--text", default=None)
-    g.add_argument("--value", default=None)
     g.add_argument("--file", default=None)
     addModeArgs(pp)
     pp.add_argument("--json", action="store_true")
